@@ -2,17 +2,34 @@ const express = require('express');
 const router = express.Router();
 const { getPool } = require('../config/database');
 
-// GET /api/mouvements/types - Liste des types de mouvements distincts dans la base
+// GET /api/mouvements/types - Codes GenreMvt distincts avec total
+// Pour GenreMvt=3 (ventes), LibMvt contient les numéros de ticket → on groupe uniquement par GenreMvt
 router.get('/types', async (req, res) => {
   try {
     const pool = getPool();
-    const result = await pool.query(`
-      SELECT GenreMvt, LibMvt, COUNT(*) AS nb_occurrences
+    // Libellés représentatifs pour les types hors ventes
+    const libmvts = await pool.query(`
+      SELECT DISTINCT ON (GenreMvt) GenreMvt, LibMvt
       FROM MvtArt
-      GROUP BY GenreMvt, LibMvt
-      ORDER BY GenreMvt, nb_occurrences DESC
+      WHERE GenreMvt != 3
+      ORDER BY GenreMvt, LibMvt
     `);
-    res.json({ types: result.rows });
+    const labelsMap = Object.fromEntries(libmvts.rows.map(r => [r.genremvt, r.libmvt]));
+
+    const result = await pool.query(`
+      SELECT GenreMvt, COUNT(*) AS nb_occurrences
+      FROM MvtArt
+      GROUP BY GenreMvt
+      ORDER BY GenreMvt
+    `);
+
+    res.json({
+      types: result.rows.map(r => ({
+        genremvt: r.genremvt,
+        libmvt: r.genremvt == 3 ? '(numéros de ticket)' : (labelsMap[r.genremvt] ?? null),
+        nb_occurrences: r.nb_occurrences,
+      }))
+    });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
