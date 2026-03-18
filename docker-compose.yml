@@ -20,6 +20,8 @@ services:
   api:
     build: .
     container_name: ff_api
+    ports:
+      - "${API_PORT:-3000}:3000"
     environment:
       PG_HOST:     postgres
       PG_PORT:     5432
