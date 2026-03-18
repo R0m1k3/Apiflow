@@ -1,5 +1,5 @@
 const { getMssql, getPg } = require('../db');
-const { batchUpsert, getLastSync, logSync } = require('../utils');
+const { batchUpsert, getLastSync, logSync, safeStr, safeBit } = require('../utils');
 
 const ARTICLES_COLS = [
   'no_id','codein','libelle1','libelle2','lib_ticket',
@@ -32,15 +32,15 @@ async function syncArticles(force) {
 
     const rows = res.recordset.map(r => ({
       no_id:             r.NO_ID,
-      codein:            r.CODEIN,
-      libelle1:          r.LIBELLE1,
-      libelle2:          r.LIBELLE2,
-      lib_ticket:        r.LIB_TICKET,
-      tax_code:          r.TAX_CODE,
-      ach_code:          r.ACH_CODE,
-      utilisable:        r.UTILISABLE,
-      actif:             r.ACTIF,
-      suspendu:          r.SUSPENDU,
+      codein:            safeStr(r.CODEIN),
+      libelle1:          safeStr(r.LIBELLE1),
+      libelle2:          safeStr(r.LIBELLE2),
+      lib_ticket:        safeStr(r.LIB_TICKET),
+      tax_code:          safeStr(r.TAX_CODE),
+      ach_code:          safeStr(r.ACH_CODE),
+      utilisable:        safeStr(r.UTILISABLE),
+      actif:             safeStr(r.ACTIF),
+      suspendu:          safeStr(r.SUSPENDU),
       suividatecreation: r.SUIVIDATECREATION,
       suividatemodif:    r.SUIVIDATEMODIF,
       nom_no_id:         r.NOM_NO_ID,
@@ -102,9 +102,9 @@ async function syncArticles(force) {
       `SELECT IDARTICLE, GTIN, PREFERENTIEL FROM ART_GTIN`
     );
     const rows = res.recordset.map(r => ({
-      idarticle:   r.IDARTICLE,
-      gtin:        r.GTIN,
-      preferentiel: r.PREFERENTIEL,
+      idarticle:    r.IDARTICLE,
+      gtin:         safeStr(r.GTIN),
+      preferentiel: safeBit(r.PREFERENTIEL),
     }));
     const count = await batchUpsert(pg, 'art_gtin', rows, ['idarticle','gtin'], GTIN_COLS);
     await logSync(pg, 'art_gtin', count, 'ok');

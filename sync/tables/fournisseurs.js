@@ -1,5 +1,5 @@
 const { getMssql, getPg } = require('../db');
-const { batchUpsert, fullRefresh, getLastSync, logSync } = require('../utils');
+const { batchUpsert, fullRefresh, getLastSync, logSync, safeDecimal } = require('../utils');
 
 const ARTFOU1_COLS = [
   'no_id','art_no_id','code','reference','ean13','itf',
@@ -58,8 +58,8 @@ async function syncFournisseurs(force) {
     );
     const rows = res.recordset.map(r => ({
       idartfou1:        r.IDARTFOU1,
-      prixachat:        r.PRIXACHAT,
-      remise_promotion: r.REMISE_PROMOTION,
+      prixachat:        safeDecimal(r.PRIXACHAT),
+      remise_promotion: safeDecimal(r.REMISE_PROMOTION),
     }));
     const count = await batchUpsert(pg, 'artfou2', rows, ['idartfou1'], ARTFOU2_COLS);
     await logSync(pg, 'artfou2', count, 'ok');

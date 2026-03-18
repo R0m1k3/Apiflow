@@ -1,5 +1,5 @@
 const { getMssql, getPg } = require('../db');
-const { fullRefresh, batchUpsert, logSync } = require('../utils');
+const { fullRefresh, batchUpsert, logSync, safeNum, safeInt, safeStr } = require('../utils');
 
 const STOCK_COLS = [
   'artnoid','site','qte','prmp','valstock','pv',
@@ -27,23 +27,23 @@ async function syncStock(force) {
     `);
 
     const rows = res.recordset.map(r => ({
-      artnoid:                  r.ArtNoId,
-      site:                     r.Site,
-      qte:                      r.QTE,
-      prmp:                     r.Prmp,
-      valstock:                 r.ValStock,
-      pv:                       r.PV,
-      stockdispo:               r.StockDispo,
-      stockmort:                r.StockMort,
-      stockcolis:               r.StockColis,
-      dernierevente:            r.DerniereVente,
-      dernierereception:        r.DerniereReception,
-      premierevente:            r.PremiereVente,
-      nbjoursdernierMouvement:  r.NbJoursDernierMouvement,
-      nbjoursdernierevente:     r.NbJoursDerniereVente,
-      nbjoursdernierrereception: r.NbJoursDerniereReception,
-      interditachat:            r.InterditAchat,
-      codefou:                  r.CODEFOU,
+      artnoid:                   r.ArtNoId,
+      site:                      safeStr(r.Site),
+      qte:                       safeNum(r.QTE),
+      prmp:                      safeNum(r.Prmp),
+      valstock:                  safeNum(r.ValStock),
+      pv:                        safeNum(r.PV),
+      stockdispo:                safeNum(r.StockDispo),
+      stockmort:                 safeNum(r.StockMort),
+      stockcolis:                safeNum(r.StockColis),
+      dernierevente:             r.DerniereVente,
+      dernierereception:         r.DerniereReception,
+      premierevente:             r.PremiereVente,
+      nbjoursdernierMouvement:   safeInt(r.NbJoursDernierMouvement),
+      nbjoursdernierevente:      safeInt(r.NbJoursDerniereVente),
+      nbjoursdernierrereception: safeInt(r.NbJoursDerniereReception),
+      interditachat:             safeStr(r.InterditAchat),
+      codefou:                   safeStr(r.CODEFOU),
     }));
 
     const count = await fullRefresh(pg, 'cube_stock', rows, STOCK_COLS);

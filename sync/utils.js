@@ -88,4 +88,50 @@ async function logSync(pg, tableName, rowsSynced, status, errorMsg = null) {
   `, [tableName, rowsSynced, status, errorMsg]);
 }
 
-module.exports = { batchUpsert, fullRefresh, getLastSync, logSync };
+// ── Helpers de conversion SQL Server → PostgreSQL ───────────
+
+/** Nettoie une chaîne : supprime null bytes (0x00), retourne null si vide */
+function safeStr(v) {
+  if (v == null) return null;
+  return String(v).replace(/\0/g, '') || null;
+}
+
+/** Convertit en nombre, retourne null si NaN ou non numérique */
+function safeNum(v) {
+  if (v == null) return null;
+  if (typeof v === 'number') return isNaN(v) ? null : v;
+  const n = parseFloat(String(v).replace(/[^0-9.\-]/g, ''));
+  return isNaN(n) ? null : n;
+}
+
+/** Convertit en entier, retourne null si NaN */
+function safeInt(v) {
+  if (v == null) return null;
+  if (typeof v === 'number') return Math.round(v);
+  const n = parseInt(v, 10);
+  return isNaN(n) ? null : n;
+}
+
+/** Convertit un BIT SQL Server (true/false) en SMALLINT (1/0) */
+function safeBit(v) {
+  if (v == null) return null;
+  return v ? 1 : 0;
+}
+
+/**
+ * Convertit une valeur DECIMAL/MONEY qui peut être retournée par mssql
+ * sous forme d'objet, tableau, ou string "[date,valeur]".
+ */
+function safeDecimal(v) {
+  if (v == null) return null;
+  if (typeof v === 'number') return isNaN(v) ? null : v;
+  if (Array.isArray(v)) {
+    const last = v[v.length - 1];
+    return typeof last === 'number' ? last : safeNum(last);
+  }
+  // ex: "[01/01/1901,163.000]" → 163
+  const m = String(v).match(/([\d]+\.?[\d]*)[\]]*$/);
+  return m ? parseFloat(m[1]) : null;
+}
+
+module.exports = { batchUpsert, fullRefresh, getLastSync, logSync, safeStr, safeNum, safeInt, safeBit, safeDecimal };

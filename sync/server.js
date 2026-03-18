@@ -61,7 +61,7 @@ app.get('/api/status', async (req, res) => {
   try {
     const pg = getPg();
     const { rows } = await pg.query(
-      `SELECT table_name, last_sync, rows_synced, status, error_message
+      `SELECT table_name, last_sync, rows_synced, status, error_msg
        FROM sync_log ORDER BY table_name`
     );
     res.json({
@@ -238,7 +238,7 @@ function renderStatus(data){
       <td><strong>\${t.table_name}</strong></td>
       <td>\${fmtDate(t.last_sync)}</td>
       <td>\${t.rows_synced ?? '—'}</td>
-      <td class="\${t.status==='ok'?'ok':'err'}">\${t.status ?? '—'}\${t.error_message?' — '+t.error_message:''}</td>
+      <td class="\${t.status==='ok'?'ok':'err'}">\${t.status ?? '—'}\${t.error_msg?' — '+t.error_msg:''}</td>
     </tr>
   \`).join('');
 }
