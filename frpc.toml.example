@@ -1,0 +1,17 @@
+# Copier en frpc.toml et remplir les valeurs
+# frpc.toml est exclu du git (contient le token secret)
+
+serverAddr = "api.ffnancy.fr"
+serverPort = 7000
+
+auth.method = "token"
+auth.token  = "CHANGE_ME_FRP_SECRET_TOKEN"
+
+log.level = "info"
+
+[[proxies]]
+name      = "foirfouille-api"
+type      = "tcp"
+localIP   = "api"
+localPort = 3000
+remotePort = 13000

@@ -1,0 +1,15 @@
+node_modules/
+sync/node_modules/
+
+# Fichiers secrets — ne jamais committer
+.env
+.env.docker
+frpc.toml
+
+# Scripts et docs d'exploration (phase de développement, pas nécessaires en prod)
+scripts/
+docs/
+
+# Fichiers de déploiement locaux
+*.log
+package-lock.json
