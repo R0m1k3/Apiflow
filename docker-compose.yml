@@ -37,6 +37,8 @@ services:
   sync:
     build: ./sync
     container_name: ff_sync
+    ports:
+      - "3001:3001"
     environment:
       DB_HOST:     ${DB_HOST}
       DB_PORT:     ${DB_PORT:-1433}
