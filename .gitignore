@@ -12,4 +12,3 @@ docs/
 
 # Fichiers de déploiement locaux
 *.log
-package-lock.json
