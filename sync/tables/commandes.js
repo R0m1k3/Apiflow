@@ -1,5 +1,5 @@
 const { getMssql, getPg } = require('../db');
-const { fullRefresh, batchUpsert, getLastSync, logSync } = require('../utils');
+const { fullRefresh, batchUpsert, getLastSync, logSync, safeBit, safeStr } = require('../utils');
 
 const VIVANT_COLS = [
   'cdefou_ligne_com_no_id','artfou1_no_id','articles_codein','articles_libelle1',
@@ -40,6 +40,7 @@ async function syncCommandes(force) {
         COTISATION_LOGISTIQUE, FRAISLOGISTIC, TRANSIT, DISTRIBUTION, TAXE,
         COMMENTAIRE, SUIVIDATECREATION
       FROM CDEFOU_VIVANT
+      WHERE ARTFOU1_NO_ID IS NOT NULL
     `);
 
     const rows = res.recordset.map(r => ({
@@ -130,9 +131,9 @@ async function syncCommandes(force) {
       remise:                  r.REMISE,
       prirec:                  r.PRIREC,
       mntrec:                  r.MNTREC,
-      motifrefus:              r.MOTIFREFUS,
-      recpb:                   r.RECPB,
-      recpbok:                 r.RECPBOK,
+      motifrefus:              safeStr(r.MOTIFREFUS),
+      recpb:                   safeBit(r.RECPB),
+      recpbok:                 safeBit(r.RECPBOK),
       suividatecreation:       r.SUIVIDATECREATION,
       suividatemodif:          r.SUIVIDATEMODIF,
     }));
