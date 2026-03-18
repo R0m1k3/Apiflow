@@ -21,8 +21,8 @@ router.get('/ca', async (req, res) => {
         SUM(MntMvtHt) AS CA_HT,
         SUM(MntMvtTTC) AS CA_TTC,
         SUM(MargeMvt) AS MARGE,
-        CASE WHEN SUM(MntMvtTTC) > 0
-          THEN ROUND(SUM(MargeMvt) / SUM(MntMvtTTC) * 100, 2)
+        CASE WHEN SUM(MntMvtHt) != 0
+          THEN ROUND(SUM(MargeMvt) / ABS(SUM(MntMvtHt)) * 100, 2)
           ELSE 0 END AS TAUX_MARGE
       FROM MvtArt
       WHERE GenreMvt = 3

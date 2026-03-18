@@ -155,8 +155,8 @@ router.get('/article/:id/periode', async (req, res) => {
         SUM(MntMvtHt) AS ca_ht,
         SUM(MntMvtTTC) AS ca_ttc,
         SUM(MargeMvt) AS marge,
-        CASE WHEN SUM(MntMvtTTC) > 0
-          THEN ROUND(SUM(MargeMvt) / SUM(MntMvtTTC) * 100, 2)
+        CASE WHEN SUM(MntMvtHt) != 0
+          THEN ROUND(SUM(MargeMvt) / ABS(SUM(MntMvtHt)) * 100, 2)
           ELSE 0 END AS taux_marge,
         MIN(DatMvt) AS premiere_vente,
         MAX(DatMvt) AS derniere_vente

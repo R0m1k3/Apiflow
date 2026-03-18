@@ -284,8 +284,8 @@ router.get('/:id/mensuel', async (req, res) => {
         SUM(MntMvtHt)      AS ca_ht,
         SUM(MntMvtTTC)     AS ca_ttc,
         SUM(MargeMvt)      AS marge,
-        CASE WHEN SUM(MntMvtTTC) > 0
-          THEN ROUND(SUM(MargeMvt) / SUM(MntMvtTTC) * 100, 2)
+        CASE WHEN SUM(MntMvtHt) != 0
+          THEN ROUND(SUM(MargeMvt) / ABS(SUM(MntMvtHt)) * 100, 2)
           ELSE 0 END       AS taux_marge
       FROM MvtArt
       WHERE ArtNoId = $1
