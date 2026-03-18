@@ -152,7 +152,76 @@ Retourne toutes les informations consolidées de l'article :
 
 ---
 
+### Analyse mensuelle d'un article (ventes + stock mois par mois)
+
+```
+GET /api/articles/:id/mensuel?dateDebut=&dateFin=&site=
+```
+
+Retourne en une seule requête, mois par mois et par site :
+- **Ventes** du mois (quantité, CA, marge)
+- **Stock fin de mois** (dernier QteStock enregistré dans le mois)
+- **Réceptions** du mois
+
+| Paramètre   | Type   | Description                | Défaut     |
+|-------------|--------|----------------------------|------------|
+| `dateDebut` | date   | Date début `YYYY-MM-DD`    | 2024-01-01 |
+| `dateFin`   | date   | Date fin `YYYY-MM-DD`      | 2099-12-31 |
+| `site`      | string | Filtrer par site           | tous       |
+
+**Réponse** :
+
+```json
+{
+  "artNoId": "12345",
+  "dateDebut": "2025-01-01",
+  "dateFin": "2025-12-31",
+  "data": [
+    {
+      "mois": "2025-12",
+      "site": "001",
+      "stock_fin_mois": 28,
+      "prmp_fin_mois": 10.20,
+      "ventes": {
+        "nb_passages": 18,
+        "qte_vendue": 17,
+        "ca_ht": 274.00,
+        "ca_ttc": 315.10,
+        "marge": 72.00,
+        "taux_marge": 22.86
+      },
+      "receptions": {
+        "nb_receptions": 1,
+        "qte_recue": 24
+      }
+    },
+    {
+      "mois": "2025-11",
+      "site": "001",
+      "stock_fin_mois": 45,
+      "prmp_fin_mois": 10.20,
+      "ventes": {
+        "nb_passages": 12,
+        "qte_vendue": 10,
+        "ca_ht": 161.00,
+        "ca_ttc": 185.15,
+        "marge": 42.00,
+        "taux_marge": 22.69
+      },
+      "receptions": null
+    }
+  ]
+}
+```
+
+> `stock_fin_mois` = QteStock du **dernier mouvement du mois** (vente, réception ou autre).
+> Si un mois n'a aucun mouvement il n'apparaît pas dans la réponse.
+> `ventes` ou `receptions` sont `null` si aucun mouvement de ce type dans le mois.
+
+---
+
 ### Mouvements d'un article
+
 ```
 GET /api/articles/:id/mouvements
 ```

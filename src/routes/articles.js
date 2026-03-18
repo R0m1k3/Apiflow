@@ -267,4 +267,103 @@ router.get('/:id/mouvements', async (req, res) => {
   }
 });
 
+// GET /api/articles/:id/mensuel?dateDebut=&dateFin=&site=
+// Ventes + stock fin de mois, mois par mois, par site
+router.get('/:id/mensuel', async (req, res) => {
+  try {
+    const pool = getPool();
+    const { dateDebut = '2024-01-01', dateFin = '2099-12-31', site = '' } = req.query;
+
+    // Ventes par mois et par site
+    const ventes = await pool.query(`
+      SELECT
+        TO_CHAR(DatMvt, 'YYYY-MM') AS mois,
+        Site,
+        COUNT(*)           AS nb_passages,
+        SUM(QteMvt)        AS qte_vendue,
+        SUM(MntMvtHt)      AS ca_ht,
+        SUM(MntMvtTTC)     AS ca_ttc,
+        SUM(MargeMvt)      AS marge,
+        CASE WHEN SUM(MntMvtTTC) > 0
+          THEN ROUND(SUM(MargeMvt) / SUM(MntMvtTTC) * 100, 2)
+          ELSE 0 END       AS taux_marge
+      FROM MvtArt
+      WHERE ArtNoId = $1
+        AND GenreMvt = 3
+        AND DatMvt BETWEEN $2 AND $3
+        AND Site LIKE $4
+      GROUP BY TO_CHAR(DatMvt, 'YYYY-MM'), Site
+      ORDER BY mois DESC, Site
+    `, [req.params.id, dateDebut, dateFin, `%${site}%`]);
+
+    // Réceptions par mois et par site
+    const receptions = await pool.query(`
+      SELECT
+        TO_CHAR(DatMvt, 'YYYY-MM') AS mois,
+        Site,
+        COUNT(*)           AS nb_receptions,
+        SUM(QteMvt)        AS qte_recue
+      FROM MvtArt
+      WHERE ArtNoId = $1
+        AND GenreMvt = 1
+        AND DatMvt BETWEEN $2 AND $3
+        AND Site LIKE $4
+      GROUP BY TO_CHAR(DatMvt, 'YYYY-MM'), Site
+      ORDER BY mois DESC, Site
+    `, [req.params.id, dateDebut, dateFin, `%${site}%`]);
+
+    // Stock fin de mois : dernier QteStock de chaque mois par site
+    const stocks = await pool.query(`
+      SELECT DISTINCT ON (TO_CHAR(DatMvt, 'YYYY-MM'), Site)
+        TO_CHAR(DatMvt, 'YYYY-MM') AS mois,
+        Site,
+        QteStock AS stock_fin_mois,
+        Prmp     AS prmp_fin_mois
+      FROM MvtArt
+      WHERE ArtNoId = $1
+        AND DatMvt BETWEEN $2 AND $3
+        AND Site LIKE $4
+      ORDER BY TO_CHAR(DatMvt, 'YYYY-MM'), Site, DatMvt DESC
+    `, [req.params.id, dateDebut, dateFin, `%${site}%`]);
+
+    // Assembler par mois+site
+    const key = (mois, site) => `${mois}|${site}`;
+    const byKey = (rows) => Object.fromEntries(rows.map(r => [key(r.mois, r.site), r]));
+
+    const sv = byKey(ventes.rows);
+    const sr = byKey(receptions.rows);
+    const ss = byKey(stocks.rows);
+
+    const keys = [...new Set([
+      ...Object.keys(sv), ...Object.keys(sr), ...Object.keys(ss),
+    ])].sort().reverse();
+
+    const data = keys.map(k => {
+      const [mois, site] = k.split('|');
+      return {
+        mois,
+        site,
+        stock_fin_mois: ss[k]?.stock_fin_mois ?? null,
+        prmp_fin_mois:  ss[k]?.prmp_fin_mois  ?? null,
+        ventes:         sv[k] ? {
+          nb_passages: sv[k].nb_passages,
+          qte_vendue:  sv[k].qte_vendue,
+          ca_ht:       sv[k].ca_ht,
+          ca_ttc:      sv[k].ca_ttc,
+          marge:       sv[k].marge,
+          taux_marge:  sv[k].taux_marge,
+        } : null,
+        receptions: sr[k] ? {
+          nb_receptions: sr[k].nb_receptions,
+          qte_recue:     sr[k].qte_recue,
+        } : null,
+      };
+    });
+
+    res.json({ artNoId: req.params.id, dateDebut, dateFin, data });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 module.exports = router;
