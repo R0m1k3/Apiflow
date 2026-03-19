@@ -46,7 +46,12 @@ async function syncRanking(force) {
       date_calcul_mag:   r.DATE_CALCUL_MAG || null,
     }));
 
-    const count = await batchUpsert(pg, 'ranking', rows, ['gencod', 'site'], COLS);
+    // Dédupliquer par (gencod, site) — garder la dernière occurrence
+    const seen = new Map();
+    for (const r of rows) seen.set(`${r.gencod}|${r.site}`, r);
+    const deduped = Array.from(seen.values());
+
+    const count = await batchUpsert(pg, 'ranking', deduped, ['gencod', 'site'], COLS);
     await logSync(pg, 'ranking', count, 'ok');
     console.log(`[ranking] ${count} lignes upsert`);
   } catch (err) {

@@ -280,17 +280,22 @@ async function refresh(){
 function copyLogs(){
   const box = document.getElementById('logBox');
   const text = Array.from(box.querySelectorAll('.log-line')).map(l => l.textContent).join('\\n');
-  navigator.clipboard.writeText(text).then(() => {
-    const btn = document.getElementById('btnCopyLogs');
-    btn.textContent = 'Copié !';
-    setTimeout(() => { btn.textContent = 'Copier les logs'; }, 2000);
-  }).catch(() => {
-    const sel = window.getSelection();
-    const range = document.createRange();
-    range.selectNodeContents(box);
-    sel.removeAllRanges();
-    sel.addRange(range);
-  });
+  const btn = document.getElementById('btnCopyLogs');
+  function onSuccess(){ btn.textContent = 'Copié !'; setTimeout(() => { btn.textContent = 'Copier les logs'; }, 2000); }
+  if(navigator.clipboard && window.isSecureContext){
+    navigator.clipboard.writeText(text).then(onSuccess).catch(fallback);
+  } else {
+    fallback();
+  }
+  function fallback(){
+    const ta = document.createElement('textarea');
+    ta.value = text;
+    ta.style.cssText = 'position:fixed;top:-9999px;left:-9999px;opacity:0';
+    document.body.appendChild(ta);
+    ta.focus(); ta.select();
+    try{ document.execCommand('copy'); onSuccess(); } catch(e){ alert('Copie manuelle : sélectionnez les logs et Ctrl+C'); }
+    document.body.removeChild(ta);
+  }
 }
 
 async function runSync(){
