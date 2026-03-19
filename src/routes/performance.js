@@ -51,7 +51,7 @@ router.get('/hitparade', async (req, res) => {
     const { dateDebut = '2024-01-01', dateFin = '2099-12-31', site = '', limit = 50, groupBy = 'ca' } = req.query;
     const limitNum = Math.max(1, Math.min(parseInt(limit) || 50, 500));
 
-    const orderCol = groupBy === 'qte' ? 'QTE_VENDUE' : groupBy === 'marge' ? 'MARGE' : 'CA_TTC';
+    const orderCol = groupBy === 'qte' ? 'QTE_VENDUE' : groupBy === 'marge' ? 'MARGE' : 'CA_HT';
 
     const result = await pool.query(`
       SELECT
@@ -59,12 +59,12 @@ router.get('/hitparade', async (req, res) => {
         a.LIBELLE1,
         m.Site,
         COUNT(*) AS NB_PASSAGES,
-        SUM(m.QteMvt) AS QTE_VENDUE,
-        SUM(m.MntMvtHt) AS CA_HT,
-        SUM(m.MntMvtTTC) AS CA_TTC,
+        ABS(SUM(m.QteMvt)) AS QTE_VENDUE,
+        ABS(SUM(m.MntMvtHt)) AS CA_HT,
+        ABS(SUM(m.MntMvtTTC)) AS CA_TTC,
         SUM(m.MargeMvt) AS MARGE,
-        CASE WHEN SUM(m.MntMvtTTC) > 0
-          THEN ROUND(SUM(m.MargeMvt) / SUM(m.MntMvtTTC) * 100, 2)
+        CASE WHEN SUM(m.MntMvtHt) != 0
+          THEN ROUND(SUM(m.MargeMvt) / ABS(SUM(m.MntMvtHt)) * 100, 2)
           ELSE 0 END AS TAUX_MARGE,
         MAX(m.DatMvt) AS DERNIERE_VENTE
       FROM MvtArt m
