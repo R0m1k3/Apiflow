@@ -25,7 +25,7 @@ async function insertChunk(pg, table, rows, cols) {
     return `(${ph.join(', ')})`;
   });
   await pg.query(
-    `INSERT INTO ${table} (${cols.join(', ')}) VALUES ${placeholders.join(', ')}`,
+    `INSERT INTO ${table} (${cols.join(', ')}) VALUES ${placeholders.join(', ')} ON CONFLICT DO NOTHING`,
     values
   );
 }

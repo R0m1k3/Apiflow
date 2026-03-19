@@ -860,6 +860,108 @@ GET /api/performance/ca/gamme?dateDebut=&dateFin=&site=
 
 ---
 
+## Ranking (classement réseau)
+
+### Recherche ranking
+```
+GET /api/ranking?gencod=&codein=&site=&foucentrale=&limit=
+```
+
+Retourne les classements réseau et magasin des articles. Les données proviennent des fichiers d'import centrale (TURBOCAR, AUXENCE, etc.).
+
+| Paramètre     | Type   | Description                        | Défaut |
+|---------------|--------|------------------------------------|--------|
+| `gencod`      | string | Code EAN exact                     | —      |
+| `codein`      | string | Code interne article               | —      |
+| `site`        | string | Filtrer par site (partiel)         | tous   |
+| `foucentrale` | string | Filtrer par fournisseur (partiel)  | tous   |
+| `limit`       | int    | Nombre max (max 500)               | 50     |
+
+**Réponse** :
+```json
+{
+  "count": 3,
+  "ranking": [
+    {
+      "gencod": "3700536100805",
+      "site": "292",
+      "libelle": "ETUI 10 CARTES FIDELITE COUSU FANTASIA",
+      "foucentrale": "FFTURBOC",
+      "nomfoucentrale": "TURBOCAR",
+      "ranking_ca": 90,
+      "ranking_qte": 39,
+      "ranking_mag_ca": 0,
+      "ranking_mag_qte": 0,
+      "ranking_mag_marge": 0,
+      "pv_calcule": 3.89,
+      "pv_mag": 0,
+      "pv_cen": null,
+      "codefamille": "350402",
+      "libellefamille": "EQUIPEMENT INTERIEUR ET EXTERIEUR",
+      "date_maj": "2024-05-06T00:00:00.000Z",
+      "date_calcul_mag": "1901-01-01T00:00:00.000Z",
+      "art_no_id": "2920000106042",
+      "codein": "129632"
+    }
+  ]
+}
+```
+
+**Clés ranking** :
+| Champ | Description |
+|-------|-------------|
+| `ranking_ca` | Classement réseau par chiffre d'affaires (1 = meilleur) |
+| `ranking_qte` | Classement réseau par quantité vendue |
+| `ranking_mag_ca` | Classement magasin par CA |
+| `ranking_mag_qte` | Classement magasin par quantité |
+| `ranking_mag_marge` | Classement magasin par marge |
+| `pv_calcule` | Prix de vente calculé par la centrale |
+| `pv_mag` | Prix de vente magasin |
+| `pv_cen` | Prix de vente centrale |
+
+> Le ranking est lié aux articles via le **GENCOD** (EAN). La jointure avec `art_gtin` permet de retrouver le `no_id` et le `codein`.
+
+---
+
+### Ranking d'un article
+```
+GET /api/ranking/article/:id
+```
+
+**Paramètre** : `id` = `no_id` de l'article
+
+Retourne le ranking pour tous les sites où l'article est référencé.
+
+```json
+{
+  "artNoId": "2920000106042",
+  "ranking": [
+    {
+      "gencod": "3700536100805",
+      "site": "292",
+      "ranking_ca": 90,
+      "ranking_qte": 39,
+      "ranking_mag_ca": 0,
+      "ranking_mag_qte": 0,
+      "ranking_mag_marge": 0,
+      "foucentrale": "FFTURBOC",
+      "nomfoucentrale": "TURBOCAR",
+      "pv_calcule": 3.89,
+      "pv_mag": 0,
+      "pv_cen": null,
+      "codefamille": "350402",
+      "libellefamille": "EQUIPEMENT INTERIEUR ET EXTERIEUR",
+      "date_maj": "2024-05-06T00:00:00.000Z",
+      "date_calcul_mag": "1901-01-01T00:00:00.000Z"
+    }
+  ]
+}
+```
+
+> Le ranking est aussi inclus dans la fiche référentiel : `GET /api/articles/:id/referentiel` → champ `ranking`.
+
+---
+
 ## Synchronisation
 
 ### État de la sync
@@ -902,6 +1004,7 @@ GET /api/sync/status
 | `cdefou_vivant` | Refresh complet | Nuit |
 | `cdefou_reception` | Delta | Nuit |
 | `cdefou_receplig` | Delta | Nuit |
+| `ranking` | Refresh complet | Nuit |
 
 ---
 
