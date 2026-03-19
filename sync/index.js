@@ -43,7 +43,11 @@ async function syncAll(force = false) {
       const { name, fn } = STEPS[i];
       setProgress(name, i + 1);
       console.log(`[${i + 1}/${STEPS.length}] Sync ${name}…`);
-      await fn(force);
+      try {
+        await fn(force);
+      } catch (err) {
+        console.error(`[${name}] ERREUR NON CATCHÉE: ${err.message}`);
+      }
     }
   } finally {
     setSyncRunning(false);

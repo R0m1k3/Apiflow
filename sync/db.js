@@ -8,6 +8,8 @@ const mssqlConfig = {
   database: process.env.DB_NAME,
   user:     process.env.DB_USER,
   password: process.env.DB_PASSWORD,
+  requestTimeout: 300000,   // 5 min pour les grosses requêtes (MvtArt)
+  cancelTimeout:  10000,    // 10s pour annuler une requête
   options: {
     encrypt: false,
     trustServerCertificate: true,
