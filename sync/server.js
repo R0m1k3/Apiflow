@@ -16,7 +16,7 @@ const state = {
 };
 
 const TABLES_ORDER = [
-  'referentiel', 'articles', 'fournisseurs', 'stock', 'mouvements', 'commandes'
+  'referentiel', 'articles', 'fournisseurs', 'stock', 'mouvements', 'commandes', 'ranking'
 ];
 const TABLES_TOTAL = TABLES_ORDER.length;
 
@@ -154,9 +154,12 @@ th{padding:.55rem 1rem;text-align:left;color:#64748b;font-weight:500;border-bott
 td{padding:.55rem 1rem;border-bottom:1px solid #1e293b}
 tr:last-child td{border-bottom:none}
 .ok{color:#4ade80}.err{color:#f87171}
-.log-box{height:320px;overflow-y:auto;font-family:monospace;font-size:.76rem;padding:.75rem 1rem;background:#0a0f1e;color:#a5f3fc;line-height:1.7}
+.log-box{height:320px;overflow-y:auto;font-family:monospace;font-size:.76rem;padding:.75rem 1rem;background:#0a0f1e;color:#a5f3fc;line-height:1.7;user-select:text;cursor:text}
+.log-line{white-space:pre-wrap;word-break:break-all}
 .log-line.error{color:#f87171}
-.ts{color:#475569;margin-right:.5rem;user-select:none}
+.ts{color:#475569;margin-right:.5rem}
+#btnCopyLogs{background:#334155;color:#cbd5e1;font-size:.75rem;padding:.35rem .8rem}
+#btnCopyLogs:hover{background:#475569}
 #lastRefresh{font-size:.75rem;color:#475569}
 </style>
 </head>
@@ -195,7 +198,10 @@ tr:last-child td{border-bottom:none}
       </table>
     </div>
     <div class="card" style="grid-column:1/-1">
-      <div class="card-header">Logs</div>
+      <div class="card-header" style="display:flex;justify-content:space-between;align-items:center">
+        <span>Logs</span>
+        <button id="btnCopyLogs" onclick="copyLogs()">Copier les logs</button>
+      </div>
       <div class="log-box" id="logBox">Chargement…</div>
     </div>
   </div>
@@ -269,6 +275,22 @@ async function refresh(){
   } catch(e){
     console.error(e);
   }
+}
+
+function copyLogs(){
+  const box = document.getElementById('logBox');
+  const text = Array.from(box.querySelectorAll('.log-line')).map(l => l.textContent).join('\\n');
+  navigator.clipboard.writeText(text).then(() => {
+    const btn = document.getElementById('btnCopyLogs');
+    btn.textContent = 'Copié !';
+    setTimeout(() => { btn.textContent = 'Copier les logs'; }, 2000);
+  }).catch(() => {
+    const sel = window.getSelection();
+    const range = document.createRange();
+    range.selectNodeContents(box);
+    sel.removeAllRanges();
+    sel.addRange(range);
+  });
 }
 
 async function runSync(){
