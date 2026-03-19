@@ -215,6 +215,35 @@ CREATE TABLE IF NOT EXISTS mvtreg (
 CREATE INDEX IF NOT EXISTS idx_mvtreg_datmvt ON mvtreg (datmvt);
 
 -- ============================================================
+-- Ranking réseau / magasin
+-- ============================================================
+
+CREATE TABLE IF NOT EXISTS ranking (
+  gencod            TEXT,
+  site              TEXT,
+  libelle           TEXT,
+  foucentrale       TEXT,
+  nomfoucentrale    TEXT,
+  ranking_ca        NUMERIC(10,2),
+  ranking_qte       NUMERIC(10,2),
+  ranking_mag_ca    NUMERIC(10,2),
+  ranking_mag_qte   NUMERIC(10,2),
+  ranking_mag_marge NUMERIC(10,2),
+  pv_calcule        NUMERIC(12,4),
+  pv_mag            NUMERIC(12,4),
+  pv_cen            NUMERIC(12,4),
+  codefamille       TEXT,
+  libellefamille    TEXT,
+  fichier           TEXT,
+  date_maj          TIMESTAMP,
+  date_integration  TIMESTAMP,
+  date_calcul_mag   TIMESTAMP,
+  PRIMARY KEY (gencod, site)
+);
+CREATE INDEX IF NOT EXISTS idx_ranking_gencod ON ranking (gencod);
+CREATE INDEX IF NOT EXISTS idx_ranking_site   ON ranking (site);
+
+-- ============================================================
 -- Commandes fournisseurs
 -- ============================================================
 

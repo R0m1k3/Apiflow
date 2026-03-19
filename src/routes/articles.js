@@ -222,10 +222,27 @@ router.get('/:id/referentiel', async (req, res) => {
       notes = notesRes.rows;
     } catch (e) { /* Table optionnelle */ }
 
+    let ranking = [];
+    try {
+      const rankRes = await pool.query(`
+        SELECT r.gencod, r.site, r.ranking_ca, r.ranking_qte,
+               r.ranking_mag_ca, r.ranking_mag_qte, r.ranking_mag_marge,
+               r.foucentrale, r.nomfoucentrale,
+               r.pv_calcule, r.pv_mag, r.pv_cen,
+               r.date_maj, r.date_calcul_mag
+        FROM ranking r
+        JOIN art_gtin g ON g.gtin = r.gencod
+        WHERE g.idarticle = $1
+        ORDER BY r.site
+      `, [id]);
+      ranking = rankRes.rows;
+    } catch (e) { /* Table optionnelle */ }
+
     res.json({
       article: article.rows[0],
       gtins: gtins.rows,
       gammes: gammes.rows,
+      ranking,
       stock: stock.rows,
       stock_remballe: stockRemballe,
       prix: {

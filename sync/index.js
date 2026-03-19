@@ -7,6 +7,7 @@ const { syncStock }        = require('./tables/stock');
 const { syncMouvements }   = require('./tables/mouvements');
 const { syncCommandes }    = require('./tables/commandes');
 const { syncReferentiel }  = require('./tables/referentiel');
+const { syncRanking }      = require('./tables/ranking');
 const { closeAll }         = require('./db');
 const {
   startDashboard, registerSyncFn,
@@ -24,6 +25,7 @@ const STEPS = [
   { name: 'stock',        fn: syncStock },
   { name: 'mouvements',   fn: syncMouvements },
   { name: 'commandes',    fn: syncCommandes },
+  { name: 'ranking',      fn: syncRanking },
 ];
 
 async function syncAll(force = false) {
