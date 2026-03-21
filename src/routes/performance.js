@@ -177,43 +177,52 @@ router.get('/dashboard', async (req, res) => {
         ORDER BY site, datmvt
       `, siteParams),
 
-      // Top 10 CA
+      // Top 10 CA par site
       pool.query(`
-        SELECT a.codein, a.libelle1, m.site,
-               ABS(SUM(m.mntmvtttc)) AS ca_ttc,
-               ABS(SUM(m.qtemvt))    AS qte_vendue,
-               SUM(m.margemvt)       AS marge
-        FROM mvtart m
-        JOIN articles a ON a.no_id = m.artnoid
-        WHERE m.datmvt::DATE = $1 AND m.genremvt = 3 ${site ? 'AND m.site = $2' : ''}
-        GROUP BY a.codein, a.libelle1, m.site
-        ORDER BY ca_ttc DESC LIMIT 10
+        SELECT codein, libelle1, site, ca_ttc, qte_vendue, marge FROM (
+          SELECT a.codein, a.libelle1, m.site,
+                 ABS(SUM(m.mntmvtttc)) AS ca_ttc,
+                 ABS(SUM(m.qtemvt))    AS qte_vendue,
+                 SUM(m.margemvt)       AS marge,
+                 RANK() OVER (PARTITION BY m.site ORDER BY ABS(SUM(m.mntmvtttc)) DESC) AS rk
+          FROM mvtart m
+          JOIN articles a ON a.no_id = m.artnoid
+          WHERE m.datmvt::DATE = $1 AND m.genremvt = 3 ${site ? 'AND m.site = $2' : ''}
+          GROUP BY a.codein, a.libelle1, m.site
+        ) t WHERE rk <= 10
+        ORDER BY site, rk
       `, site ? [targetDate, site] : [targetDate]),
 
-      // Top 10 Qté
+      // Top 10 Qté par site
       pool.query(`
-        SELECT a.codein, a.libelle1, m.site,
-               ABS(SUM(m.mntmvtttc)) AS ca_ttc,
-               ABS(SUM(m.qtemvt))    AS qte_vendue,
-               SUM(m.margemvt)       AS marge
-        FROM mvtart m
-        JOIN articles a ON a.no_id = m.artnoid
-        WHERE m.datmvt::DATE = $1 AND m.genremvt = 3 ${site ? 'AND m.site = $2' : ''}
-        GROUP BY a.codein, a.libelle1, m.site
-        ORDER BY qte_vendue DESC LIMIT 10
+        SELECT codein, libelle1, site, ca_ttc, qte_vendue, marge FROM (
+          SELECT a.codein, a.libelle1, m.site,
+                 ABS(SUM(m.mntmvtttc)) AS ca_ttc,
+                 ABS(SUM(m.qtemvt))    AS qte_vendue,
+                 SUM(m.margemvt)       AS marge,
+                 RANK() OVER (PARTITION BY m.site ORDER BY ABS(SUM(m.qtemvt)) DESC) AS rk
+          FROM mvtart m
+          JOIN articles a ON a.no_id = m.artnoid
+          WHERE m.datmvt::DATE = $1 AND m.genremvt = 3 ${site ? 'AND m.site = $2' : ''}
+          GROUP BY a.codein, a.libelle1, m.site
+        ) t WHERE rk <= 10
+        ORDER BY site, rk
       `, site ? [targetDate, site] : [targetDate]),
 
-      // Top 10 Marge
+      // Top 10 Marge par site
       pool.query(`
-        SELECT a.codein, a.libelle1, m.site,
-               ABS(SUM(m.mntmvtttc)) AS ca_ttc,
-               ABS(SUM(m.qtemvt))    AS qte_vendue,
-               SUM(m.margemvt)       AS marge
-        FROM mvtart m
-        JOIN articles a ON a.no_id = m.artnoid
-        WHERE m.datmvt::DATE = $1 AND m.genremvt = 3 ${site ? 'AND m.site = $2' : ''}
-        GROUP BY a.codein, a.libelle1, m.site
-        ORDER BY marge DESC LIMIT 10
+        SELECT codein, libelle1, site, ca_ttc, qte_vendue, marge FROM (
+          SELECT a.codein, a.libelle1, m.site,
+                 ABS(SUM(m.mntmvtttc)) AS ca_ttc,
+                 ABS(SUM(m.qtemvt))    AS qte_vendue,
+                 SUM(m.margemvt)       AS marge,
+                 RANK() OVER (PARTITION BY m.site ORDER BY SUM(m.margemvt) DESC) AS rk
+          FROM mvtart m
+          JOIN articles a ON a.no_id = m.artnoid
+          WHERE m.datmvt::DATE = $1 AND m.genremvt = 3 ${site ? 'AND m.site = $2' : ''}
+          GROUP BY a.codein, a.libelle1, m.site
+        ) t WHERE rk <= 10
+        ORDER BY site, rk
       `, site ? [targetDate, site] : [targetDate]),
     ]);
 
