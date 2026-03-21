@@ -4,7 +4,7 @@ const cron = require('node-cron');
 const { syncArticles }     = require('./tables/articles');
 const { syncFournisseurs } = require('./tables/fournisseurs');
 const { syncStock }        = require('./tables/stock');
-const { syncMouvements }   = require('./tables/mouvements');
+const { syncMouvements, syncStatOpCA } = require('./tables/mouvements');
 const { syncCommandes }    = require('./tables/commandes');
 const { syncReferentiel }  = require('./tables/referentiel');
 const { syncRanking }      = require('./tables/ranking');
@@ -24,6 +24,7 @@ const STEPS = [
   { name: 'fournisseurs', fn: syncFournisseurs },
   { name: 'stock',        fn: syncStock },
   { name: 'mouvements',   fn: syncMouvements },
+  { name: 'statopca',     fn: syncStatOpCA },
   { name: 'commandes',    fn: syncCommandes },
   { name: 'ranking',      fn: syncRanking },
 ];

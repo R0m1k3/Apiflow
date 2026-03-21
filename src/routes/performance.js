@@ -153,4 +153,103 @@ router.get('/ca/gamme', async (req, res) => {
   }
 });
 
+// GET /api/performance/dashboard?date=2026-03-20&site=
+// CA + trafic du jour vs N-1 + top 10 CA / qté / marge
+router.get('/dashboard', async (req, res) => {
+  try {
+    const pool = getPool();
+    const { date, site = '' } = req.query;
+
+    const targetDate = date || new Date(Date.now() - 86400000).toISOString().slice(0, 10);
+    const n1Date     = new Date(targetDate);
+    n1Date.setFullYear(n1Date.getFullYear() - 1);
+    const n1DateStr  = n1Date.toISOString().slice(0, 10);
+
+    const siteFilter = site ? `AND site = $3` : '';
+    const siteParams = site ? [targetDate, n1DateStr, site] : [targetDate, n1DateStr];
+
+    const [caRows, top10CA, top10Qte, top10Marge] = await Promise.all([
+      // CA + trafic N et N-1
+      pool.query(`
+        SELECT site, datmvt::DATE AS date, mnt AS ca_ttc, nbticket AS trafic
+        FROM statopca
+        WHERE datmvt IN ($1, $2) ${siteFilter}
+        ORDER BY site, datmvt
+      `, siteParams),
+
+      // Top 10 CA
+      pool.query(`
+        SELECT a.codein, a.libelle1, m.site,
+               ABS(SUM(m.mntmvtttc)) AS ca_ttc,
+               ABS(SUM(m.qtemvt))    AS qte_vendue,
+               SUM(m.margemvt)       AS marge
+        FROM mvtart m
+        JOIN articles a ON a.no_id = m.artnoid
+        WHERE m.datmvt::DATE = $1 AND m.genremvt = 3 ${site ? 'AND m.site = $2' : ''}
+        GROUP BY a.codein, a.libelle1, m.site
+        ORDER BY ca_ttc DESC LIMIT 10
+      `, site ? [targetDate, site] : [targetDate]),
+
+      // Top 10 Qté
+      pool.query(`
+        SELECT a.codein, a.libelle1, m.site,
+               ABS(SUM(m.mntmvtttc)) AS ca_ttc,
+               ABS(SUM(m.qtemvt))    AS qte_vendue,
+               SUM(m.margemvt)       AS marge
+        FROM mvtart m
+        JOIN articles a ON a.no_id = m.artnoid
+        WHERE m.datmvt::DATE = $1 AND m.genremvt = 3 ${site ? 'AND m.site = $2' : ''}
+        GROUP BY a.codein, a.libelle1, m.site
+        ORDER BY qte_vendue DESC LIMIT 10
+      `, site ? [targetDate, site] : [targetDate]),
+
+      // Top 10 Marge
+      pool.query(`
+        SELECT a.codein, a.libelle1, m.site,
+               ABS(SUM(m.mntmvtttc)) AS ca_ttc,
+               ABS(SUM(m.qtemvt))    AS qte_vendue,
+               SUM(m.margemvt)       AS marge
+        FROM mvtart m
+        JOIN articles a ON a.no_id = m.artnoid
+        WHERE m.datmvt::DATE = $1 AND m.genremvt = 3 ${site ? 'AND m.site = $2' : ''}
+        GROUP BY a.codein, a.libelle1, m.site
+        ORDER BY marge DESC LIMIT 10
+      `, site ? [targetDate, site] : [targetDate]),
+    ]);
+
+    // Construire la comparaison N vs N-1 par site
+    const byDate = {};
+    for (const row of caRows.rows) {
+      const d = row.date instanceof Date ? row.date.toISOString().slice(0, 10) : String(row.date).slice(0, 10);
+      if (!byDate[row.site]) byDate[row.site] = {};
+      byDate[row.site][d] = { ca_ttc: parseFloat(row.ca_ttc) || 0, trafic: row.trafic || 0 };
+    }
+
+    const sites = Object.keys(byDate).sort().map(s => {
+      const n  = byDate[s]?.[targetDate] || { ca_ttc: 0, trafic: 0 };
+      const n1 = byDate[s]?.[n1DateStr]  || { ca_ttc: 0, trafic: 0 };
+      const evolCa     = n1.ca_ttc  > 0 ? Math.round((n.ca_ttc  / n1.ca_ttc  - 1) * 1000) / 10 : null;
+      const evolTrafic = n1.trafic  > 0 ? Math.round((n.trafic  / n1.trafic  - 1) * 1000) / 10 : null;
+      return {
+        site:          s,
+        ca_ttc:        n.ca_ttc,   ca_ttc_n1:    n1.ca_ttc,
+        evol_ca:       evolCa !== null ? `${evolCa > 0 ? '+' : ''}${evolCa}%` : null,
+        trafic:        n.trafic,   trafic_n1:    n1.trafic,
+        evol_trafic:   evolTrafic !== null ? `${evolTrafic > 0 ? '+' : ''}${evolTrafic}%` : null,
+      };
+    });
+
+    res.json({
+      date:       targetDate,
+      date_n1:    n1DateStr,
+      sites,
+      top10_ca:    top10CA.rows,
+      top10_qte:   top10Qte.rows,
+      top10_marge: top10Marge.rows,
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 module.exports = router;

@@ -310,3 +310,16 @@ CREATE TABLE IF NOT EXISTS cdefou_receplig (
 );
 CREATE INDEX IF NOT EXISTS idx_receplig_artfou1 ON cdefou_receplig (artfou1_no_id);
 CREATE INDEX IF NOT EXISTS idx_receplig_date    ON cdefou_receplig (suividatecreation);
+
+-- ============================================================
+-- CA journalier + trafic (StatOpCAJour SQL Server)
+-- ============================================================
+
+CREATE TABLE IF NOT EXISTS statopca (
+  site     TEXT        NOT NULL,
+  datmvt   DATE        NOT NULL,
+  mnt      NUMERIC(14,4),
+  nbticket INTEGER,
+  PRIMARY KEY (site, datmvt)
+);
+CREATE INDEX IF NOT EXISTS idx_statopca_datmvt ON statopca (datmvt);

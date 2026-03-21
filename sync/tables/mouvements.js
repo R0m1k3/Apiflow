@@ -1,6 +1,8 @@
 const { getMssql, getPg } = require('../db');
 const { logSync } = require('../utils');
 
+const STATOPCA_COLS = ['site', 'datmvt', 'mnt', 'nbticket'];
+
 const MVTART_COLS = [
   'artnoid','datmvt','site','libmvt','genremvt',
   'qtemvt','valmvt','mntmvtht','mntmvtttc','margemvt',
@@ -135,4 +137,52 @@ async function syncMouvements(force) {
   }
 }
 
-module.exports = { syncMouvements };
+// === StatOpCAJour (upsert par site+date) ===
+async function syncStatOpCA(force) {
+  const ms = await getMssql();
+  const pg  = getPg();
+
+  try {
+    const maxRes = await pg.query(`SELECT MAX(datmvt) AS last FROM statopca`);
+    let lastDate  = maxRes.rows[0]?.last;
+    if (!lastDate || force) {
+      const twoYearsAgo = new Date();
+      twoYearsAgo.setFullYear(twoYearsAgo.getFullYear() - 2);
+      lastDate = twoYearsAgo;
+    }
+
+    const res = await ms.request()
+      .input('lastDate', lastDate)
+      .query(`SELECT SITE, DatMvt, mnt, nbTicket FROM StatOpCAJour WHERE DatMvt > @lastDate ORDER BY DatMvt`);
+
+    const rows = res.recordset.map(r => ({
+      site:     r.SITE,
+      datmvt:   r.DatMvt,
+      mnt:      r.mnt,
+      nbticket: r.nbTicket,
+    }));
+
+    for (let i = 0; i < rows.length; i += CHUNK) {
+      const chunk = rows.slice(i, i + CHUNK);
+      const values = [];
+      const placeholders = chunk.map((row, ri) => {
+        STATOPCA_COLS.forEach(col => values.push(row[col] ?? null));
+        const ph = STATOPCA_COLS.map((_, ci) => `$${ri * STATOPCA_COLS.length + ci + 1}`);
+        return `(${ph.join(', ')})`;
+      });
+      await pg.query(
+        `INSERT INTO statopca (${STATOPCA_COLS.join(', ')}) VALUES ${placeholders.join(', ')}
+         ON CONFLICT (site, datmvt) DO UPDATE SET mnt=EXCLUDED.mnt, nbticket=EXCLUDED.nbticket`,
+        values
+      );
+    }
+
+    await logSync(pg, 'statopca', rows.length, 'ok');
+    console.log(`[statopca] ${rows.length} lignes`);
+  } catch (err) {
+    await logSync(pg, 'statopca', 0, 'error', err.message);
+    console.error(`[statopca] ERREUR: ${err.message}`);
+  }
+}
+
+module.exports = { syncMouvements, syncStatOpCA };
