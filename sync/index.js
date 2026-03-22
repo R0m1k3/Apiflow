@@ -72,8 +72,8 @@ if (forceMode) {
     });
 } else {
   startDashboard();
-  console.log('Service sync démarré — cron: 0 3 * * * (3h00 chaque nuit)');
-  cron.schedule('0 3 * * *', () => {
+  console.log('Service sync démarré — cron: 0 6 * * * (6h00 chaque nuit)');
+  cron.schedule('0 6 * * *', () => {
     syncAll(false).catch(err => console.error('Erreur cron sync:', err.message));
   });
 }
