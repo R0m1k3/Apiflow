@@ -341,3 +341,32 @@ CREATE TABLE IF NOT EXISTS stat_dispoperm (
   PRIMARY KEY (codesite, code_art)
 );
 CREATE INDEX IF NOT EXISTS idx_stat_dispoperm_code_art ON stat_dispoperm (code_art);
+
+-- ============================================================
+-- Journal de commande conseillé (PHENIX_QUANTITE_CONSEILLE)
+-- ============================================================
+
+CREATE TABLE IF NOT EXISTS phenix_quantite_conseille (
+  ident              BIGINT PRIMARY KEY,
+  site               TEXT,
+  codein             TEXT,
+  libelle_article    TEXT,
+  code1              TEXT,
+  libelle1           TEXT,
+  idartfou1          BIGINT,
+  art_no_id          BIGINT,
+  colisage           NUMERIC(10,3),
+  moyenne_vente_jour NUMERIC(12,6),
+  nb_jour_vte        INTEGER,
+  besoin_calcule     NUMERIC(12,4),
+  stock_mini         NUMERIC(12,3),
+  stock_maxi         NUMERIC(12,3),
+  qte_non_recue      NUMERIC(12,3),
+  qte_stock          NUMERIC(12,3),
+  besoin_pris        NUMERIC(12,4),
+  a_commander        NUMERIC(12,3),
+  montant            NUMERIC(14,4)
+);
+CREATE INDEX IF NOT EXISTS idx_phenix_cde_site     ON phenix_quantite_conseille (site);
+CREATE INDEX IF NOT EXISTS idx_phenix_cde_codein   ON phenix_quantite_conseille (codein);
+CREATE INDEX IF NOT EXISTS idx_phenix_cde_artfou1  ON phenix_quantite_conseille (idartfou1);

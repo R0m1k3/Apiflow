@@ -8,6 +8,8 @@ const { syncMouvements, syncStatOpCA } = require('./tables/mouvements');
 const { syncCommandes }    = require('./tables/commandes');
 const { syncReferentiel }  = require('./tables/referentiel');
 const { syncRanking }      = require('./tables/ranking');
+const { syncStatDispoperm } = require('./tables/stat_dispoperm');
+const { syncPhenixQuantiteConseille } = require('./tables/phenix_quantite_conseille');
 const { closeAll }         = require('./db');
 const {
   startDashboard, registerSyncFn,
@@ -26,7 +28,9 @@ const STEPS = [
   { name: 'mouvements',   fn: syncMouvements },
   { name: 'statopca',     fn: syncStatOpCA },
   { name: 'commandes',    fn: syncCommandes },
-  { name: 'ranking',      fn: syncRanking },
+  { name: 'ranking',        fn: syncRanking },
+  { name: 'stat_dispoperm',            fn: syncStatDispoperm },
+  { name: 'phenix_quantite_conseille', fn: syncPhenixQuantiteConseille },
 ];
 
 async function syncAll(force = false) {

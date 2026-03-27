@@ -4,7 +4,7 @@ const { batchUpsert, getLastSync, logSync, safeStr, safeBit } = require('../util
 const ARTICLES_COLS = [
   'no_id','codein','libelle1','libelle2','lib_ticket',
   'tax_code','ach_code','utilisable','actif','suspendu',
-  'suividatecreation','suividatemodif','nom_no_id',
+  'suividatecreation','suividatemodif','nom_no_id','artcentrale',
 ];
 const INFOSUP_COLS = [
   'artnoid','prix_vente_mini','prix_vente_maxi','eco_ht','eco_ttc',
@@ -26,7 +26,7 @@ async function syncArticles(force) {
     const res = await ms.request().query(`
       SELECT NO_ID, CODEIN, LIBELLE1, LIBELLE2, LIB_TICKET,
              TAX_CODE, ACH_CODE, UTILISABLE, ACTIF, SUSPENDU,
-             SUIVIDATECREATION, SUIVIDATEMODIF, NOM_NO_ID
+             SUIVIDATECREATION, SUIVIDATEMODIF, NOM_NO_ID, ARTCENTRALE
       FROM ARTICLES ${where}
     `);
 
@@ -44,6 +44,7 @@ async function syncArticles(force) {
       suividatecreation: r.SUIVIDATECREATION,
       suividatemodif:    r.SUIVIDATEMODIF,
       nom_no_id:         r.NOM_NO_ID,
+      artcentrale:       r.ARTCENTRALE ?? null,
     }));
 
     const count = await batchUpsert(pg, 'articles', rows, ['no_id'], ARTICLES_COLS);
