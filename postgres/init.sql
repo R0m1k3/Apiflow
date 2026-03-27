@@ -29,7 +29,8 @@ CREATE TABLE IF NOT EXISTS articles (
   suspendu          TEXT,
   suividatecreation TIMESTAMP,
   suividatemodif    TIMESTAMP,
-  nom_no_id         BIGINT
+  nom_no_id         BIGINT,
+  artcentrale       TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_articles_codein     ON articles (codein);
 CREATE INDEX IF NOT EXISTS idx_articles_libelle1   ON articles (libelle1);
@@ -323,3 +324,20 @@ CREATE TABLE IF NOT EXISTS statopca (
   PRIMARY KEY (site, datmvt)
 );
 CREATE INDEX IF NOT EXISTS idx_statopca_datmvt ON statopca (datmvt);
+
+-- ============================================================
+-- Gamme conseillée par site (STAT_DISPOPERM SQL Server)
+-- ============================================================
+
+CREATE TABLE IF NOT EXISTS stat_dispoperm (
+  codesite   TEXT        NOT NULL,
+  code_art   TEXT        NOT NULL,
+  recommand  TEXT,
+  statut     TEXT,
+  qtemoyer   NUMERIC(10,3),
+  qtemoyes   NUMERIC(10,3),
+  camoyes    NUMERIC(12,4),
+  nbreclient INTEGER,
+  PRIMARY KEY (codesite, code_art)
+);
+CREATE INDEX IF NOT EXISTS idx_stat_dispoperm_code_art ON stat_dispoperm (code_art);
