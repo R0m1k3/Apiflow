@@ -400,7 +400,7 @@ CREATE TABLE IF NOT EXISTS cdefou_ligne (
   no_id              BIGINT PRIMARY KEY,
   artfou1_no_id      BIGINT,
   commande_fou_no_id BIGINT,
-  cdelig             INTEGER,
+  cdelig             TEXT,
   cdeligtard         TIMESTAMP,
   cdeligtot          TIMESTAMP,
   prixbrut           NUMERIC(12,4),

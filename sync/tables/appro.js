@@ -81,7 +81,7 @@ async function syncAppro(force) {
       no_id:               r.NO_ID,
       artfou1_no_id:       r.ARTFOU1_NO_ID,
       commande_fou_no_id:  r.COMMANDE_FOU_NO_ID,
-      cdelig:              r.CDELIG ?? null,
+      cdelig:              safeStr(r.CDELIG),
       cdeligtard:          r.CDELIGTARD ?? null,
       cdeligtot:           r.CDELIGTOT ?? null,
       prixbrut:            r.PRIXBRUT ?? null,
