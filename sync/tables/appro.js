@@ -1,5 +1,5 @@
 const { getMssql, getPg } = require('../db');
-const { batchUpsert, fullRefresh, getLastSync, logSync } = require('../utils');
+const { batchUpsert, fullRefresh, getLastSync, logSync, safeStr, safeDecimal } = require('../utils');
 
 const COMMANDE_FOU_COLS = [
   'no_id','cdenum','sit_cod_emet','sit_cod_desti','fouident_code',
@@ -49,9 +49,9 @@ async function syncAppro(force) {
       port_code:        r.PORT_CODE,
       cdedate:          r.CDEDATE,
       cdeetat:          r.CDEETAT,
-      cdetot:           r.CDETOT ?? null,
+      cdetot:           safeDecimal(r.CDETOT),
       cdetard:          r.CDETARD ?? null,
-      cdeportmontant:   r.CDEPORTMONTANT ?? null,
+      cdeportmontant:   safeDecimal(r.CDEPORTMONTANT),
       cdeannulation:    r.CDEANNULATION ?? null,
       suividatecreation: r.SUIVIDATECREATION,
       suividatemodif:   r.SUIVIDATEMODIF,
