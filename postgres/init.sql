@@ -370,3 +370,85 @@ CREATE TABLE IF NOT EXISTS phenix_quantite_conseille (
 CREATE INDEX IF NOT EXISTS idx_phenix_cde_site     ON phenix_quantite_conseille (site);
 CREATE INDEX IF NOT EXISTS idx_phenix_cde_codein   ON phenix_quantite_conseille (codein);
 CREATE INDEX IF NOT EXISTS idx_phenix_cde_artfou1  ON phenix_quantite_conseille (idartfou1);
+
+-- ============================================================
+-- Commandes fournisseurs historique + réapprovisionnement
+-- ============================================================
+
+CREATE TABLE IF NOT EXISTS commande_fou (
+  no_id             BIGINT PRIMARY KEY,
+  cdenum            TEXT,
+  sit_cod_emet      TEXT,
+  sit_cod_desti     TEXT,
+  fouident_code     TEXT,
+  foutarif_no_id    BIGINT,
+  port_code         TEXT,
+  cdedate           TIMESTAMP,
+  cdeetat           TEXT,
+  cdetot            NUMERIC(14,4),
+  cdetard           TIMESTAMP,
+  cdeportmontant    NUMERIC(12,4),
+  cdeannulation     TEXT,
+  suividatecreation TIMESTAMP,
+  suividatemodif    TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_commande_fou_fouident ON commande_fou (fouident_code);
+CREATE INDEX IF NOT EXISTS idx_commande_fou_date     ON commande_fou (cdedate);
+CREATE INDEX IF NOT EXISTS idx_commande_fou_etat     ON commande_fou (cdeetat);
+
+CREATE TABLE IF NOT EXISTS cdefou_ligne (
+  no_id              BIGINT PRIMARY KEY,
+  artfou1_no_id      BIGINT,
+  commande_fou_no_id BIGINT,
+  cdelig             INTEGER,
+  cdeligtard         TIMESTAMP,
+  cdeligtot          TIMESTAMP,
+  prixbrut           NUMERIC(12,4),
+  remise             NUMERIC(10,4),
+  prixnet            NUMERIC(12,4),
+  qtecde             NUMERIC(12,3),
+  gratuit            NUMERIC(12,3),
+  montant            NUMERIC(14,4),
+  qteacc             NUMERIC(12,3),
+  qteann             NUMERIC(12,3),
+  qteatt             NUMERIC(12,3),
+  qterel             NUMERIC(12,3),
+  colisage           NUMERIC(10,3),
+  suividatecreation  TIMESTAMP,
+  suividatemodif     TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_cdefou_ligne_artfou1  ON cdefou_ligne (artfou1_no_id);
+CREATE INDEX IF NOT EXISTS idx_cdefou_ligne_commande ON cdefou_ligne (commande_fou_no_id);
+
+CREATE TABLE IF NOT EXISTS commande_auto_qtepropo (
+  fou_code          TEXT,
+  art_no_id         BIGINT,
+  codesite          TEXT,
+  qtepropo          NUMERIC(12,3),
+  parametre_numero  INTEGER,
+  suividatecreation TIMESTAMP,
+  suividatemodif    TIMESTAMP,
+  PRIMARY KEY (fou_code, art_no_id, codesite)
+);
+CREATE INDEX IF NOT EXISTS idx_caqp_art_no_id ON commande_auto_qtepropo (art_no_id);
+CREATE INDEX IF NOT EXISTS idx_caqp_codesite  ON commande_auto_qtepropo (codesite);
+
+CREATE TABLE IF NOT EXISTS plan_reappro (
+  id                   INTEGER PRIMARY KEY,
+  magasin              TEXT,
+  codein               TEXT,
+  bu_no_id             BIGINT,
+  stockmag             NUMERIC(12,3),
+  encours_palette_mag  NUMERIC(12,3),
+  attente_prepa_mag    NUMERIC(12,3),
+  colis_rea            NUMERIC(12,3),
+  colis_ajout_web      NUMERIC(12,3),
+  stock_dispo          NUMERIC(12,3),
+  attente_prepa_depot  NUMERIC(12,3),
+  stock_dispo_calcul   NUMERIC(12,3),
+  colisage             NUMERIC(10,3),
+  bloque               TEXT,
+  date_besoin          TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_plan_reappro_magasin ON plan_reappro (magasin);
+CREATE INDEX IF NOT EXISTS idx_plan_reappro_codein  ON plan_reappro (codein);

@@ -16,7 +16,8 @@ const state = {
 };
 
 const TABLES_ORDER = [
-  'referentiel', 'articles', 'fournisseurs', 'stock', 'mouvements', 'commandes', 'ranking'
+  'referentiel', 'articles', 'fournisseurs', 'stock', 'mouvements', 'commandes',
+  'ranking', 'stat_dispoperm', 'phenix_quantite_conseille', 'appro'
 ];
 const TABLES_TOTAL = TABLES_ORDER.length;
 
