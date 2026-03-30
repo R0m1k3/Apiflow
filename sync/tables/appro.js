@@ -94,7 +94,7 @@ async function syncAppro(force) {
       qteann:              r.QTEANN ?? null,
       qteatt:              r.QTEATT ?? null,
       qterel:              r.QTEREL ?? null,
-      colisage:            r.COLISAGE ?? null,
+      colisage:            safeStr(r.COLISAGE),
       suividatecreation:   r.SUIVIDATECREATION,
       suividatemodif:      r.SUIVIDATEMODIF,
     }));

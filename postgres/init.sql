@@ -413,7 +413,7 @@ CREATE TABLE IF NOT EXISTS cdefou_ligne (
   qteann             NUMERIC(12,3),
   qteatt             NUMERIC(12,3),
   qterel             NUMERIC(12,3),
-  colisage           NUMERIC(10,3),
+  colisage           TEXT,
   suividatecreation  TIMESTAMP,
   suividatemodif     TIMESTAMP
 );
