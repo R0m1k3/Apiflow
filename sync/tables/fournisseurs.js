@@ -7,7 +7,8 @@ const ARTFOU1_COLS = [
   'suividatecreation','suividatemodif',
 ];
 const ARTFOU2_COLS = ['idartfou1','prixachat','remise_promotion'];
-const FOUADR1_COLS = ['code','sit_code','raisonsociale','adrligne1','telephone','email'];
+const FOUADR1_COLS  = ['code','sit_code','raisonsociale','adrligne1','telephone','email'];
+const FOUIDENT_COLS = ['code','fon_code','cnuf','nom','actif','suspendu','permanen','foucentrale','suividatecreation','suividatemodif'];
 
 async function syncFournisseurs(force) {
   const ms = await getMssql();
@@ -88,6 +89,32 @@ async function syncFournisseurs(force) {
   } catch (err) {
     await logSync(pg, 'fouadr1', 0, 'error', err.message);
     console.error(`[fouadr1] ERREUR: ${err.message}`);
+  }
+
+  // === FOUIDENT (full refresh — table principale fournisseurs) ===
+  try {
+    const res = await ms.request().query(
+      `SELECT CODE, FON_CODE, CNUF, NOM, ACTIF, SUSPENDU, PERMANEN, FOUCENTRALE,
+              SUIVIDATECREATION, SUIVIDATEMODIF FROM FOUIDENT`
+    );
+    const rows = res.recordset.map(r => ({
+      code:              r.CODE,
+      fon_code:          r.FON_CODE,
+      cnuf:              r.CNUF,
+      nom:               r.NOM,
+      actif:             r.ACTIF,
+      suspendu:          r.SUSPENDU,
+      permanen:          r.PERMANEN,
+      foucentrale:       r.FOUCENTRALE,
+      suividatecreation: r.SUIVIDATECREATION,
+      suividatemodif:    r.SUIVIDATEMODIF,
+    }));
+    const count = await fullRefresh(pg, 'fouident', rows, FOUIDENT_COLS);
+    await logSync(pg, 'fouident', count, 'ok');
+    console.log(`[fouident] ${count} lignes refresh`);
+  } catch (err) {
+    await logSync(pg, 'fouident', 0, 'error', err.message);
+    console.error(`[fouident] ERREUR: ${err.message}`);
   }
 }
 

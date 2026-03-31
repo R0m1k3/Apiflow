@@ -136,6 +136,19 @@ CREATE TABLE IF NOT EXISTS fouadr1 (
   PRIMARY KEY (code, sit_code)
 );
 
+CREATE TABLE IF NOT EXISTS fouident (
+  code              TEXT PRIMARY KEY,
+  fon_code          TEXT,
+  cnuf              TEXT,
+  nom               TEXT,
+  actif             BOOLEAN,
+  suspendu          BOOLEAN,
+  permanen          TEXT,
+  foucentrale       TEXT,
+  suividatecreation TIMESTAMP,
+  suividatemodif    TIMESTAMP
+);
+
 -- ============================================================
 -- Cubes de stock et prix
 -- ============================================================
