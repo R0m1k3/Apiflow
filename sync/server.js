@@ -16,7 +16,7 @@ const state = {
 };
 
 const TABLES_ORDER = [
-  'referentiel', 'articles', 'fournisseurs', 'stock', 'mouvements', 'commandes',
+  'referentiel', 'articles', 'fournisseurs', 'stock', 'mouvements', 'statopca', 'commandes',
   'ranking', 'stat_dispoperm', 'phenix_quantite_conseille', 'appro'
 ];
 const TABLES_TOTAL = TABLES_ORDER.length;
@@ -83,9 +83,15 @@ app.get('/api/logs', (req, res) => {
 
 // Prochain cron
 app.get('/api/next', (req, res) => {
-  const now  = new Date();
+  const now = new Date();
+  // Calcule le prochain 06:45 heure Europe/Paris
+  const parisOffset = (() => {
+    const u = new Date(now.toLocaleString('en-US', { timeZone: 'UTC' }));
+    const p = new Date(now.toLocaleString('en-US', { timeZone: 'Europe/Paris' }));
+    return (p - u) / 3600000; // heures
+  })();
   const next = new Date(now);
-  next.setHours(6, 45, 0, 0);
+  next.setHours(6 - parisOffset, 45, 0, 0); // 06:45 Paris → heure UTC serveur
   if (next <= now) next.setDate(next.getDate() + 1);
   res.json({ next: next.toISOString() });
 });
