@@ -78,8 +78,8 @@ if (forceMode) {
     });
 } else {
   startDashboard();
-  console.log('Service sync démarré — cron: 0 6 * * * (6h00 chaque nuit)');
-  cron.schedule('0 6 * * *', () => {
+  console.log('Service sync démarré — cron: 45 6 * * * Europe/Paris (6h45 chaque nuit)');
+  cron.schedule('45 6 * * *', () => {
     syncAll(false).catch(err => console.error('Erreur cron sync:', err.message));
-  });
+  }, { timezone: 'Europe/Paris' });
 }
