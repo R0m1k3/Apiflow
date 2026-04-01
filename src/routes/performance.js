@@ -17,15 +17,16 @@ router.get('/ca', async (req, res) => {
         ${groupExpr} AS Periode,
         Site,
         COUNT(*) AS NB_VENTES,
-        SUM(QteMvt) AS QTE_VENDUE,
-        SUM(MntMvtHt) AS CA_HT,
-        SUM(MntMvtTTC) AS CA_TTC,
-        SUM(MargeMvt) AS MARGE,
-        CASE WHEN SUM(MntMvtHt) != 0
-          THEN ROUND(SUM(MargeMvt) / ABS(SUM(MntMvtHt)) * 100, 2)
+        SUM(CASE WHEN mntmvtttc < 0 THEN ABS(qtemvt) ELSE 0 END) AS QTE_VENDUE,
+        SUM(CASE WHEN mntmvtttc < 0 THEN ABS(mntmvtht)  ELSE 0 END) AS CA_HT,
+        SUM(CASE WHEN mntmvtttc < 0 THEN ABS(mntmvtttc) ELSE 0 END) AS CA_TTC,
+        SUM(CASE WHEN mntmvtttc > 0 THEN mntmvtttc      ELSE 0 END) AS RETOURS_TTC,
+        SUM(margemvt) AS MARGE,
+        CASE WHEN SUM(mntmvtht) != 0
+          THEN ROUND(SUM(margemvt) / ABS(SUM(mntmvtht)) * 100, 2)
           ELSE 0 END AS TAUX_MARGE
       FROM MvtArt
-      WHERE GenreMvt = 3
+      WHERE GenreMvt IN (3, 4, 9)
         AND DatMvt BETWEEN $1 AND $2
         AND Site LIKE $3
       GROUP BY ${groupExpr}, Site
@@ -59,9 +60,9 @@ router.get('/hitparade', async (req, res) => {
         a.LIBELLE1,
         m.Site,
         COUNT(*) AS NB_PASSAGES,
-        ABS(SUM(m.QteMvt)) AS QTE_VENDUE,
-        ABS(SUM(m.MntMvtHt)) AS CA_HT,
-        ABS(SUM(m.MntMvtTTC)) AS CA_TTC,
+        SUM(CASE WHEN m.mntmvtttc < 0 THEN ABS(m.qtemvt)    ELSE 0 END) AS QTE_VENDUE,
+        SUM(CASE WHEN m.mntmvtttc < 0 THEN ABS(m.mntmvtht)  ELSE 0 END) AS CA_HT,
+        SUM(CASE WHEN m.mntmvtttc < 0 THEN ABS(m.mntmvtttc) ELSE 0 END) AS CA_TTC,
         SUM(m.MargeMvt) AS MARGE,
         CASE WHEN SUM(m.MntMvtHt) != 0
           THEN ROUND(SUM(m.MargeMvt) / ABS(SUM(m.MntMvtHt)) * 100, 2)
@@ -69,7 +70,7 @@ router.get('/hitparade', async (req, res) => {
         MAX(m.DatMvt) AS DERNIERE_VENTE
       FROM MvtArt m
       JOIN ARTICLES a ON a.NO_ID = m.ArtNoId
-      WHERE m.GenreMvt = 3
+      WHERE m.GenreMvt IN (3, 4, 9)
         AND m.DatMvt BETWEEN $1 AND $2
         AND m.Site LIKE $3
       GROUP BY a.CODEIN, a.LIBELLE1, m.Site
