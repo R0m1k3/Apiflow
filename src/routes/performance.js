@@ -122,6 +122,41 @@ router.get('/ca/nomenclature', async (req, res) => {
   }
 });
 
+// GET /api/performance/ca/fournisseur?dateDebut=&dateFin=&site=
+router.get('/ca/fournisseur', async (req, res) => {
+  try {
+    const pool = getPool();
+    const { dateDebut = '2024-01-01', dateFin = '2099-12-31', site = '' } = req.query;
+
+    const result = await pool.query(`
+      SELECT
+        COALESCE(fi.nom, af.code, 'Inconnu') AS fournisseur,
+        af.code AS code_fournisseur,
+        COUNT(DISTINCT m.artnoid) AS nb_articles,
+        ABS(SUM(m.qtemvt))    AS qte_vendue,
+        ABS(SUM(m.mntmvtht))  AS ca_ht,
+        ABS(SUM(m.mntmvtttc)) AS ca_ttc,
+        SUM(m.margemvt)       AS marge,
+        CASE WHEN SUM(m.mntmvtht) != 0
+          THEN ROUND(SUM(m.margemvt) / ABS(SUM(m.mntmvtht)) * 100, 2)
+          ELSE 0 END AS taux_marge
+      FROM mvtart m
+      JOIN articles a ON a.no_id = m.artnoid
+      LEFT JOIN artfou1 af ON af.art_no_id = a.no_id AND af.preference = true
+      LEFT JOIN fouident fi ON fi.code = af.code
+      WHERE m.genremvt = 3
+        AND m.datmvt BETWEEN $1 AND $2
+        AND m.site LIKE $3
+      GROUP BY fi.nom, af.code
+      ORDER BY ca_ttc DESC
+    `, [dateDebut, dateFin, `%${site}%`]);
+
+    res.json({ dateDebut, dateFin, site: site || 'tous', ca_par_fournisseur: result.rows });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // GET /api/performance/ca/gamme?dateDebut=&dateFin=&site=
 router.get('/ca/gamme', async (req, res) => {
   try {
