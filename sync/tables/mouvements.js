@@ -16,7 +16,7 @@ const MVTREG_COLS = [
 
 const CHUNK = 2000;
 
-async function insertChunk(pg, table, rows, cols) {
+async function insertChunk(pg, table, rows, cols, conflictTarget = null) {
   if (!rows.length) return;
   const values = [];
   const placeholders = rows.map((row, ri) => {
@@ -26,8 +26,9 @@ async function insertChunk(pg, table, rows, cols) {
     });
     return `(${ph.join(', ')})`;
   });
+  const conflict = conflictTarget ? `ON CONFLICT (${conflictTarget}) DO NOTHING` : '';
   await pg.query(
-    `INSERT INTO ${table} (${cols.join(', ')}) VALUES ${placeholders.join(', ')} ON CONFLICT (no_id) DO NOTHING`,
+    `INSERT INTO ${table} (${cols.join(', ')}) VALUES ${placeholders.join(', ')} ${conflict}`,
     values
   );
 }
@@ -78,7 +79,7 @@ async function syncMouvements(force) {
 
     let inserted = 0;
     for (let i = 0; i < allRows.length; i += CHUNK) {
-      await insertChunk(pg, 'mvtart', allRows.slice(i, i + CHUNK), MVTART_COLS);
+      await insertChunk(pg, 'mvtart', allRows.slice(i, i + CHUNK), MVTART_COLS, 'no_id');
       inserted += Math.min(CHUNK, allRows.length - i);
     }
 
