@@ -4,7 +4,7 @@ const { logSync } = require('../utils');
 const STATOPCA_COLS = ['site', 'datmvt', 'mnt', 'nbticket'];
 
 const MVTART_COLS = [
-  'artnoid','datmvt','site','libmvt','genremvt',
+  'no_id','artnoid','datmvt','site','libmvt','genremvt',
   'qtemvt','valmvt','mntmvtht','mntmvtttc','margemvt',
   'qtestock','prmp','valstock','codefou',
 ];
@@ -27,7 +27,7 @@ async function insertChunk(pg, table, rows, cols) {
     return `(${ph.join(', ')})`;
   });
   await pg.query(
-    `INSERT INTO ${table} (${cols.join(', ')}) VALUES ${placeholders.join(', ')} ON CONFLICT DO NOTHING`,
+    `INSERT INTO ${table} (${cols.join(', ')}) VALUES ${placeholders.join(', ')} ON CONFLICT (no_id) DO NOTHING`,
     values
   );
 }
@@ -50,7 +50,7 @@ async function syncMouvements(force) {
     const res = await ms.request()
       .input('lastDate', lastDate)
       .query(`
-        SELECT ArtNoId, DatMvt, Site, LibMvt, GenreMvt,
+        SELECT NO_ID, ArtNoId, DatMvt, Site, LibMvt, GenreMvt,
                QteMvt, ValMvt, MntMvtHt, MntMvtTTC, MargeMvt,
                QteStock, Prmp, ValStock, CODEFOU
         FROM MvtArt
@@ -59,6 +59,7 @@ async function syncMouvements(force) {
       `);
 
     const allRows = res.recordset.map(r => ({
+      no_id:      r.NO_ID,
       artnoid:    r.ArtNoId,
       datmvt:     r.DatMvt,
       site:       r.Site,

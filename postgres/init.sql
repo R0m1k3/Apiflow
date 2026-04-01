@@ -193,6 +193,7 @@ CREATE INDEX IF NOT EXISTS idx_cube_pv_site ON cube_pv (site);
 -- ============================================================
 
 CREATE TABLE IF NOT EXISTS mvtart (
+  no_id      BIGINT PRIMARY KEY,
   artnoid    BIGINT,
   datmvt     TIMESTAMP,
   site       TEXT,
