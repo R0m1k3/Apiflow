@@ -11,6 +11,7 @@ const { syncRanking }      = require('./tables/ranking');
 const { syncStatDispoperm } = require('./tables/stat_dispoperm');
 const { syncPhenixQuantiteConseille } = require('./tables/phenix_quantite_conseille');
 const { syncAppro }              = require('./tables/appro');
+const { syncPublicites }         = require('./tables/publicites');
 const { closeAll }         = require('./db');
 const {
   startDashboard, registerSyncFn,
@@ -33,6 +34,7 @@ const STEPS = [
   { name: 'stat_dispoperm',            fn: syncStatDispoperm },
   { name: 'phenix_quantite_conseille', fn: syncPhenixQuantiteConseille },
   { name: 'appro',                     fn: syncAppro },
+  { name: 'publicites',                fn: syncPublicites },
 ];
 
 async function syncAll(force = false) {

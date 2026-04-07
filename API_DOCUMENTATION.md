@@ -3,7 +3,7 @@
 **Base URL** : `https://api.ffnancy.fr`
 **Format** : JSON
 **Méthode** : GET uniquement (API lecture seule)
-**Données** : Synchronisées depuis SQL Server chaque nuit à 3h00
+**Données** : Synchronisées depuis SQL Server chaque nuit à 6h45 (heure Paris)
 
 ---
 
@@ -253,7 +253,9 @@ GET /api/articles/:id/mouvements
 }
 ```
 
-**Valeurs `GenreMvt`** : `1` = entrée stock, `3` = vente
+**Valeurs `GenreMvt`** : `1` = entrée stock, `3` = vente, `4` = avoir/annulation, `9` = autre vente
+
+> Le CA TTC (`ca_ttc`) représente les **ventes brutes** (mouvements négatifs des genremvt 3, 4, 9). Le champ `retours_ttc` contient les retours séparément. CA net = `ca_ttc - retours_ttc`.
 
 ---
 
@@ -763,6 +765,7 @@ GET /api/performance/ca
       "qte_vendue": 9640,
       "ca_ht": 85200.00,
       "ca_ttc": 97980.00,
+      "retours_ttc": 1250.00,
       "marge": 21300.00,
       "taux_marge": 21.74
     }
@@ -805,6 +808,39 @@ GET /api/performance/hitparade
   ]
 }
 ```
+
+---
+
+### CA par fournisseur
+```
+GET /api/performance/ca/fournisseur?dateDebut=&dateFin=&site=
+```
+
+| Paramètre   | Type   | Description              | Défaut     |
+|-------------|--------|--------------------------|------------|
+| `dateDebut` | date   | Date début `YYYY-MM-DD`  | 2024-01-01 |
+| `dateFin`   | date   | Date fin `YYYY-MM-DD`    | 2099-12-31 |
+| `site`      | string | Filtrer par site         | tous       |
+
+**Réponse** :
+```json
+{
+  "ca_par_fournisseur": [
+    {
+      "fournisseur": "DURACELL",
+      "code_fournisseur": "D034",
+      "nb_articles": 12,
+      "qte_vendue": 840,
+      "ca_ht": 4200.00,
+      "ca_ttc": 5040.00,
+      "marge": 1680.00,
+      "taux_marge": 40.00
+    }
+  ]
+}
+```
+
+> La jointure se fait via `artfou1.preference = true` (fournisseur principal de l'article) → `fouident.code` pour le nom.
 
 ---
 
@@ -996,15 +1032,24 @@ GET /api/sync/status
 | `cube_stock` | Refresh complet | Nuit |
 | `cube_pa` | Refresh complet | Nuit |
 | `cube_pv` | Refresh complet | Nuit |
-| `mvtart` | Append (DatMvt >= hier) | Nuit |
+| `mvtart` | Append par NO_ID (PK SQL Server) | Nuit |
+| `mvtreg` | Append par date | Nuit |
 | `nomenclature` | Refresh complet | Nuit |
 | `gammes` | Refresh complet | Nuit |
 | `art_gamme_saison` | Refresh complet | Nuit |
 | `saisons` | Refresh complet | Nuit |
+| `fouident` | Refresh complet | Nuit |
 | `cdefou_vivant` | Refresh complet | Nuit |
 | `cdefou_reception` | Delta | Nuit |
 | `cdefou_receplig` | Delta | Nuit |
+| `commande_fou` | Upsert (NO_ID) | Nuit |
+| `cdefou_ligne` | Upsert (NO_ID) | Nuit |
+| `commande_auto_qtepropo` | Refresh complet | Nuit |
+| `plan_reappro` | Refresh complet | Nuit |
 | `ranking` | Refresh complet | Nuit |
+| `stat_dispoperm` | Upsert | Nuit |
+| `phenix_quantite_conseille` | Refresh complet | Nuit |
+| `statopca` | Upsert (site+date) | Nuit |
 
 ---
 
@@ -1084,7 +1129,7 @@ async function getCommandesFournisseur(codeFou) {
 ## Notes importantes
 
 - Les données sont en lecture seule — aucun endpoint d'écriture
-- Les données sont décalées d'au plus 24h (sync à 3h00)
+- Les données sont décalées d'au plus 24h (sync automatique à 6h45 heure Paris)
 - Les champs dates sont au format ISO 8601 UTC
 - La pagination commence à `page=1`
 - Le champ `no_id` est l'identifiant interne SQL Server de l'article
