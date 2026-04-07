@@ -70,7 +70,11 @@ async function syncPublicites(force) {
       FROM FBENTPUB
     `);
 
-    const rows = res.recordset.map(r => ({
+    // Dédoublonnage sur ENT_NPUB (doublons présents côté SQL Server)
+    const seen = new Set();
+    const rows = res.recordset
+      .filter(r => { const k = String(r.ENT_NPUB); if (seen.has(k)) return false; seen.add(k); return true; })
+      .map(r => ({
       ent_npub:  String(r.ENT_NPUB),
       ent_datdeb: r.ENT_DATDEB && r.ENT_DATDEB.getFullYear() > 1901 ? r.ENT_DATDEB : null,
       ent_datfin: r.ENT_DATFIN && r.ENT_DATFIN.getFullYear() > 1901 ? r.ENT_DATFIN : null,
@@ -78,6 +82,7 @@ async function syncPublicites(force) {
     }));
 
     await pg.query('TRUNCATE TABLE pub_entetes');
+
     for (let i = 0; i < rows.length; i += CHUNK) {
       const chunk = rows.slice(i, i + CHUNK);
       const values = [];
