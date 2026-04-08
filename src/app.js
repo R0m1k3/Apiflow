@@ -12,6 +12,7 @@ const performanceRouter = require('./routes/performance');
 const syncRouter        = require('./routes/sync');
 const rankingRouter       = require('./routes/ranking');
 const publicitesRouter    = require('./routes/publicites');
+const commandesAutoRouter = require('./routes/commandes-auto');
 
 const app = express();
 app.use(express.json());
@@ -37,7 +38,8 @@ app.use('/api/mouvements',   mouvementsRouter);
 app.use('/api/performance',  performanceRouter);
 app.use('/api/sync',         syncRouter);
 app.use('/api/ranking',      rankingRouter);
-app.use('/api/publicites',   publicitesRouter);
+app.use('/api/publicites',      publicitesRouter);
+app.use('/api/commandes-auto',  commandesAutoRouter);
 
 // 404
 app.use((req, res) => {
@@ -76,5 +78,7 @@ app.listen(PORT, () => {
   console.log('  GET /api/performance/ca/gamme[?dateDebut=&dateFin=&site=]');
   console.log('  GET /api/publicites[?search=&site=&dateDebut=&dateFin=&page=&limit=]');
   console.log('  GET /api/publicites/:code[?site=]');
+  console.log('  GET /api/commandes-auto[?site=&codefou=]');
+  console.log('  GET /api/commandes-auto/:codefou[?site=]');
   console.log('  GET /api/sync/status');
 });

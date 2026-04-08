@@ -17,6 +17,11 @@ const COMMANDE_AUTO_COLS = [
   'fou_code','art_no_id','codesite','qtepropo','parametre_numero','suividatecreation','suividatemodif',
 ];
 
+const FOUCAD_COLS = [
+  'foucode','franco','actif','duree','unite','dateref','datecom',
+  'montantcdeauto','datecdeauto','suividatecreation','suividatemodif',
+];
+
 const PLAN_REAPPRO_COLS = [
   'id','magasin','codein','bu_no_id','stockmag','encours_palette_mag',
   'attente_prepa_mag','colis_rea','colis_ajout_web','stock_dispo',
@@ -131,6 +136,36 @@ async function syncAppro(force) {
   } catch (err) {
     await logSync(pg, 'commande_auto_qtepropo', 0, 'error', err.message);
     console.error(`[commande_auto_qtepropo] ERREUR: ${err.message}`);
+  }
+
+  // === FOUCAD (full refresh — config commande auto par fournisseur) ===
+  try {
+    const res = await ms.request().query(`
+      SELECT FOUCODE, FRANCO, ACTIF, DUREE, UNITE, DATEREF, DATECOM,
+             MONTANTCDEAUTO, DATECDEAUTO, SUIVIDATECREATION, SUIVIDATEMODIF
+      FROM FOUCAD
+    `);
+
+    const rows = res.recordset.map(r => ({
+      foucode:           r.FOUCODE,
+      franco:            r.FRANCO ?? null,
+      actif:             r.ACTIF ?? null,
+      duree:             r.DUREE ?? null,
+      unite:             r.UNITE ?? null,
+      dateref:           r.DATEREF ?? null,
+      datecom:           r.DATECOM ?? null,
+      montantcdeauto:    r.MONTANTCDEAUTO ?? null,
+      datecdeauto:       r.DATECDEAUTO ?? null,
+      suividatecreation: r.SUIVIDATECREATION,
+      suividatemodif:    r.SUIVIDATEMODIF,
+    }));
+
+    const count = await fullRefresh(pg, 'foucad', rows, FOUCAD_COLS);
+    await logSync(pg, 'foucad', count, 'ok');
+    console.log(`[foucad] ${count} lignes`);
+  } catch (err) {
+    await logSync(pg, 'foucad', 0, 'error', err.message);
+    console.error(`[foucad] ERREUR: ${err.message}`);
   }
 
   // === PLAN_REAPPRO (full refresh — état courant) ===

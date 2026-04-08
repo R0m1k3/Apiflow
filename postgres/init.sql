@@ -447,6 +447,20 @@ CREATE TABLE IF NOT EXISTS commande_auto_qtepropo (
 CREATE INDEX IF NOT EXISTS idx_caqp_art_no_id ON commande_auto_qtepropo (art_no_id);
 CREATE INDEX IF NOT EXISTS idx_caqp_codesite  ON commande_auto_qtepropo (codesite);
 
+CREATE TABLE IF NOT EXISTS foucad (
+  foucode           TEXT PRIMARY KEY,
+  franco            NUMERIC(12,2),
+  actif             BOOLEAN,
+  duree             INTEGER,
+  unite             INTEGER,
+  dateref           TIMESTAMP,
+  datecom           TIMESTAMP,
+  montantcdeauto    NUMERIC(12,2),
+  datecdeauto       TIMESTAMP,
+  suividatecreation TIMESTAMP,
+  suividatemodif    TIMESTAMP
+);
+
 -- ============================================================
 -- Publicités (FBENTPUB + ECOULEMENT + ECOULEMENT_DETAIL SQL Server)
 -- ============================================================
