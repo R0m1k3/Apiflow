@@ -29,11 +29,11 @@ const PLAN_REAPPRO_COLS = [
 ];
 
 async function syncAppro(force) {
-  const ms = await getMssql();
-  const pg  = getPg();
+  const pg = getPg();
 
   // === COMMANDE_FOU (upsert delta) ===
   try {
+    const ms = await getMssql();
     const lastSync = force ? null : await getLastSync(pg, 'commande_fou');
     const where    = lastSync ? `WHERE SUIVIDATEMODIF > '${lastSync.toISOString()}'` : '';
 
@@ -72,6 +72,7 @@ async function syncAppro(force) {
 
   // === CDEFOU_LIGNE (upsert delta) ===
   try {
+    const ms = await getMssql();
     const lastSync = force ? null : await getLastSync(pg, 'cdefou_ligne');
     const where    = lastSync ? `WHERE SUIVIDATEMODIF > '${lastSync.toISOString()}'` : '';
 

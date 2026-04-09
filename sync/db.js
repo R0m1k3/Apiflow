@@ -24,6 +24,10 @@ let pgPool = null;
 async function getMssql() {
   if (!mssqlPool) {
     mssqlPool = await sql.connect(mssqlConfig);
+    mssqlPool.on('error', (err) => {
+      console.error('[mssql] Pool error, reconnexion au prochain appel:', err.message);
+      mssqlPool = null;
+    });
   }
   return mssqlPool;
 }
