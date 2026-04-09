@@ -115,6 +115,7 @@ async function syncAppro(force) {
 
   // === COMMANDE_AUTO_QTEPROPO (full refresh — état courant) ===
   try {
+    const ms = await getMssql();
     const res = await ms.request().query(`
       SELECT FOU_CODE, ART_NO_ID, CODESITE, QTEPROPO,
              PARAMETRE_NUMERO, SUIVIDATECREATION, SUIVIDATEMODIF
@@ -141,6 +142,7 @@ async function syncAppro(force) {
 
   // === FOUCAD (full refresh — config commande auto par fournisseur) ===
   try {
+    const ms = await getMssql();
     const res = await ms.request().query(`
       SELECT FOUCODE, FRANCO, ACTIF, DUREE, UNITE, DATEREF, DATECOM,
              MONTANTCDEAUTO, DATECDEAUTO, SUIVIDATECREATION, SUIVIDATEMODIF
@@ -171,6 +173,7 @@ async function syncAppro(force) {
 
   // === PLAN_REAPPRO (full refresh — état courant) ===
   try {
+    const ms = await getMssql();
     const res = await ms.request().query(`
       SELECT id, Magasin, Codein, BU_no_id, StockMag, EncoursPaletteMag,
              AttentePrepaMag, ColisRea, ColisAjoutWeb, StockDispo,
