@@ -39,17 +39,11 @@ services:
     container_name: ff_sync
     ports:
       - "3001:3001"
+    env_file:
+      - .env.docker
     environment:
-      DB_HOST:     ${DB_HOST}
-      DB_PORT:     ${DB_PORT:-1433}
-      DB_NAME:     ${DB_NAME}
-      DB_USER:     ${DB_USER}
-      DB_PASSWORD: ${DB_PASSWORD}
-      PG_HOST:     postgres
-      PG_PORT:     5432
-      PG_DB:       ${PG_DB}
-      PG_USER:     ${PG_USER}
-      PG_PASSWORD: ${PG_PASSWORD}
+      PG_HOST: postgres
+      PG_PORT: "5432"
     depends_on:
       postgres:
         condition: service_healthy
