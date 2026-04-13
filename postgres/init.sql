@@ -461,6 +461,27 @@ CREATE TABLE IF NOT EXISTS foucad (
   suividatemodif    TIMESTAMP
 );
 
+-- Conditions de port fournisseur (source officielle du franco)
+CREATE TABLE IF NOT EXISTS fouport (
+  no_id             NUMERIC(20,0) PRIMARY KEY,
+  code              TEXT,
+  sit_code          TEXT,
+  suividatecreation TIMESTAMP,
+  suividatemodif    TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_fouport_code ON fouport (code);
+
+CREATE TABLE IF NOT EXISTS fouport2 (
+  fou_no_id         NUMERIC(20,0),
+  no_id             NUMERIC(20,0) PRIMARY KEY,
+  seuil             NUMERIC(12,2),
+  mode              SMALLINT,
+  valeur            NUMERIC(12,2),
+  suividatecreation TIMESTAMP,
+  suividatemodif    TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_fouport2_fou_no_id ON fouport2 (fou_no_id);
+
 -- ============================================================
 -- Publicités (FBENTPUB + ECOULEMENT + ECOULEMENT_DETAIL SQL Server)
 -- ============================================================

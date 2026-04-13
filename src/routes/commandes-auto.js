@@ -14,27 +14,31 @@ router.get('/', async (req, res) => {
         q.codesite                                          AS site,
         q.fou_code                                          AS codefou,
         fi.nom                                              AS nom_fou,
-        fc.franco                                           AS franco_ht,
+        COALESCE(fp2.seuil, fc.franco)                      AS franco_ht,
         COUNT(q.art_no_id)                                  AS nb_articles,
         SUM(q.qtepropo)                                     AS qte_totale,
         ROUND(SUM(q.qtepropo * cp.pa), 2)                  AS montant_propo_ht,
         CASE
-          WHEN fc.franco IS NULL OR fc.franco = 0 THEN 'N/A'
-          WHEN SUM(q.qtepropo * cp.pa) >= fc.franco        THEN 'OUI'
+          WHEN COALESCE(fp2.seuil, fc.franco) IS NULL OR COALESCE(fp2.seuil, fc.franco) = 0 THEN 'N/A'
+          WHEN SUM(q.qtepropo * cp.pa) >= COALESCE(fp2.seuil, fc.franco) THEN 'OUI'
           ELSE 'NON'
         END                                                 AS franco_atteint,
         CASE
-          WHEN fc.franco IS NULL OR fc.franco = 0 THEN NULL
-          ELSE ROUND(fc.franco - SUM(q.qtepropo * cp.pa), 2)
+          WHEN COALESCE(fp2.seuil, fc.franco) IS NULL OR COALESCE(fp2.seuil, fc.franco) = 0 THEN NULL
+          ELSE ROUND(COALESCE(fp2.seuil, fc.franco) - SUM(q.qtepropo * cp.pa), 2)
         END                                                 AS ecart_franco
       FROM commande_auto_qtepropo q
       LEFT JOIN fouident fi  ON fi.code    = q.fou_code
       LEFT JOIN foucad   fc  ON fc.foucode = q.fou_code
+      LEFT JOIN fouport  fp  ON fp.code    = q.fou_code
+      LEFT JOIN (
+        SELECT fou_no_id, MAX(seuil) AS seuil FROM fouport2 GROUP BY fou_no_id
+      )                fp2 ON fp2.fou_no_id = fp.no_id
       LEFT JOIN cube_pa  cp  ON cp.artnoid = q.art_no_id
       WHERE q.qtepropo > 0
         AND ($1 = '' OR q.codesite LIKE $1)
         AND ($2 = '' OR q.fou_code ILIKE $2)
-      GROUP BY q.codesite, q.fou_code, fi.nom, fc.franco
+      GROUP BY q.codesite, q.fou_code, fi.nom, fc.franco, fp2.seuil
       ORDER BY q.codesite, montant_propo_ht DESC
     `, [`%${site}%`, `%${codefou}%`]);
 
@@ -58,27 +62,31 @@ router.get('/:codefou', async (req, res) => {
         q.codesite                                          AS site,
         q.fou_code                                          AS codefou,
         fi.nom                                              AS nom_fou,
-        fc.franco                                           AS franco_ht,
+        COALESCE(fp2.seuil, fc.franco)                      AS franco_ht,
         COUNT(q.art_no_id)                                  AS nb_articles,
         SUM(q.qtepropo)                                     AS qte_totale,
         ROUND(SUM(q.qtepropo * cp.pa), 2)                  AS montant_propo_ht,
         CASE
-          WHEN fc.franco IS NULL OR fc.franco = 0 THEN 'N/A'
-          WHEN SUM(q.qtepropo * cp.pa) >= fc.franco        THEN 'OUI'
+          WHEN COALESCE(fp2.seuil, fc.franco) IS NULL OR COALESCE(fp2.seuil, fc.franco) = 0 THEN 'N/A'
+          WHEN SUM(q.qtepropo * cp.pa) >= COALESCE(fp2.seuil, fc.franco) THEN 'OUI'
           ELSE 'NON'
         END                                                 AS franco_atteint,
         CASE
-          WHEN fc.franco IS NULL OR fc.franco = 0 THEN NULL
-          ELSE ROUND(fc.franco - SUM(q.qtepropo * cp.pa), 2)
+          WHEN COALESCE(fp2.seuil, fc.franco) IS NULL OR COALESCE(fp2.seuil, fc.franco) = 0 THEN NULL
+          ELSE ROUND(COALESCE(fp2.seuil, fc.franco) - SUM(q.qtepropo * cp.pa), 2)
         END                                                 AS ecart_franco
       FROM commande_auto_qtepropo q
       LEFT JOIN fouident fi  ON fi.code    = q.fou_code
       LEFT JOIN foucad   fc  ON fc.foucode = q.fou_code
+      LEFT JOIN fouport  fp  ON fp.code    = q.fou_code
+      LEFT JOIN (
+        SELECT fou_no_id, MAX(seuil) AS seuil FROM fouport2 GROUP BY fou_no_id
+      )                fp2 ON fp2.fou_no_id = fp.no_id
       LEFT JOIN cube_pa  cp  ON cp.artnoid = q.art_no_id
       WHERE q.qtepropo > 0
         AND q.fou_code ILIKE $1
         AND ($2 = '' OR q.codesite LIKE $2)
-      GROUP BY q.codesite, q.fou_code, fi.nom, fc.franco
+      GROUP BY q.codesite, q.fou_code, fi.nom, fc.franco, fp2.seuil
       ORDER BY q.codesite
     `, [codefou, `%${site}%`]);
 
