@@ -31,9 +31,9 @@ router.get('/', async (req, res) => {
       LEFT JOIN ART_GTIN g ON g.IDARTICLE = a.NO_ID AND g.PREFERENTIEL = 1
       LEFT JOIN LATERAL (
         SELECT f.CODE, f.REFERENCE AS REF, f.QTEUA AS PCB,
-               fa.RAISONSOCIALE AS NOM_FOU
+               fi.nom AS NOM_FOU
         FROM ARTFOU1 f
-        LEFT JOIN FOUADR1 fa ON fa.CODE = f.CODE AND fa.SIT_CODE = '000'
+        LEFT JOIN fouident fi ON fi.code = TRIM(f.CODE)
         WHERE f.ART_NO_ID = a.NO_ID
         ORDER BY f.PREFERENCE
         LIMIT 1
@@ -182,13 +182,13 @@ router.get('/:id/referentiel', async (req, res) => {
     );
 
     const fournisseurs = await pool.query(`
-      SELECT f.CODE AS CODEFOU, fa.RAISONSOCIALE AS NOM_FOU,
+      SELECT f.CODE AS CODEFOU, fi.nom AS NOM_FOU,
              f.REFERENCE AS REF_FOU, f.EAN13, f.ITF,
              f.QTEUA AS PCB, f.SPCB, f.DELAI, f.SECURITE,
              f.PREFERENCE, f.SUSPENDU,
              t.PRIXACHAT, t.REMISE_PROMOTION
       FROM ARTFOU1 f
-      LEFT JOIN FOUADR1 fa ON fa.CODE = f.CODE AND fa.SIT_CODE = '000'
+      LEFT JOIN fouident fi ON fi.code = TRIM(f.CODE)
       LEFT JOIN ARTFOU2 t ON t.IDARTFOU1 = f.NO_ID
       WHERE f.ART_NO_ID = $1
       ORDER BY f.PREFERENCE
