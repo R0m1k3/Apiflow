@@ -2,15 +2,16 @@ const express = require('express');
 const router = express.Router();
 const { getPool } = require('../config/database');
 
-// GET /api/publicites?search=&site=&dateDebut=&dateFin=&page=&limit=
+// GET /api/publicites?search=&site=&dateDebut=&dateFin=&statut=en_cours|passees|futures|toutes&page=&limit=
 router.get('/', async (req, res) => {
   try {
     const pool = getPool();
     const {
       search = '',
       site = '',
-      dateDebut = '2000-01-01',
-      dateFin = '2099-12-31',
+      dateDebut = '',
+      dateFin = '',
+      statut = '',
       page = 1,
       limit = 50,
     } = req.query;
@@ -18,6 +19,15 @@ router.get('/', async (req, res) => {
     const pageNum  = Math.max(1, parseInt(page) || 1);
     const limitNum = Math.max(1, Math.min(parseInt(limit) || 50, 500));
     const offset   = (pageNum - 1) * limitNum;
+
+    // Filtre statut
+    let statutFilter = '';
+    if      (statut === 'en_cours') statutFilter = `AND CURRENT_DATE BETWEEN e.tcrd_datedeb AND e.tcrd_datefin`;
+    else if (statut === 'passees')  statutFilter = `AND e.tcrd_datefin < CURRENT_DATE`;
+    else if (statut === 'futures')  statutFilter = `AND e.tcrd_datedeb > CURRENT_DATE`;
+
+    const deb = dateDebut || '2000-01-01';
+    const fin = dateFin   || '2099-12-31';
 
     // Synthèse par pub (agrégat multi-sites)
     const result = await pool.query(`
@@ -44,6 +54,11 @@ router.get('/', async (req, res) => {
         ROUND(e.taux_sortie::NUMERIC, 2)                AS taux_sortie,
         ROUND(e.marge::NUMERIC, 4)                      AS marge,
         ROUND(e.taux_marge::NUMERIC, 2)                 AS taux_marge,
+        CASE
+          WHEN CURRENT_DATE BETWEEN e.tcrd_datedeb AND e.tcrd_datefin THEN 'en_cours'
+          WHEN e.tcrd_datefin < CURRENT_DATE                           THEN 'passee'
+          ELSE 'future'
+        END                                             AS statut,
         (SELECT COUNT(DISTINCT d.artnoid)
          FROM pub_ecoulement_detail d
          WHERE d.tcr_code = e.tcr_code AND d.site = e.site)  AS nb_articles
@@ -52,9 +67,10 @@ router.get('/', async (req, res) => {
         AND ($2 = '' OR e.site ILIKE '%' || $2 || '%')
         AND e.tcrd_datedeb >= $3
         AND e.tcrd_datedeb <= $4
+        ${statutFilter}
       ORDER BY e.tcrd_datedeb DESC, e.tcr_code, e.site
       LIMIT $5 OFFSET $6
-    `, [search, site, dateDebut, dateFin, limitNum, offset]);
+    `, [search, site, deb, fin, limitNum, offset]);
 
     res.json({
       page: pageNum,
