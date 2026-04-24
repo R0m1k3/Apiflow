@@ -39,7 +39,6 @@ router.get('/', async (req, res) => {
       LEFT JOIN franco_port fp ON fp.code   = q.fou_code
       LEFT JOIN cube_pa    cp ON cp.artnoid = q.art_no_id
       WHERE q.qtepropo > 0
-        AND fc.actif IS NOT FALSE
         AND ($1 = '' OR q.codesite LIKE $1)
         AND ($2 = '' OR q.fou_code ILIKE $2)
       GROUP BY q.codesite, q.fou_code, fi.nom, fc.franco, fp.seuil
@@ -91,7 +90,6 @@ router.get('/:codefou', async (req, res) => {
       LEFT JOIN franco_port fp ON fp.code   = q.fou_code
       LEFT JOIN cube_pa    cp ON cp.artnoid = q.art_no_id
       WHERE q.qtepropo > 0
-        AND fc.actif IS NOT FALSE
         AND q.fou_code ILIKE $1
         AND ($2 = '' OR q.codesite LIKE $2)
       GROUP BY q.codesite, q.fou_code, fi.nom, fc.franco, fp.seuil
