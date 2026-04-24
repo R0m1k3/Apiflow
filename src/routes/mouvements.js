@@ -57,20 +57,20 @@ router.get('/articles', async (req, res) => {
         CASE WHEN m.GenreMvt = 3 THEN (
           SELECT e.CODEFOU FROM MvtArt e
           WHERE e.ArtNoId = m.ArtNoId AND e.Site = m.Site
-            AND e.GenreMvt = 1 AND e.CODEFOU IS NOT NULL AND e.CODEFOU != ''
+            AND e.GenreMvt = 1 AND e.CODEFOU IS NOT NULL AND TRIM(e.CODEFOU) != ''
             AND e.DatMvt <= m.DatMvt
           ORDER BY e.DatMvt DESC LIMIT 1
-        ) ELSE m.CODEFOU END AS codefou_reel,
+        ) ELSE TRIM(m.CODEFOU) END AS codefou_reel,
         CASE WHEN m.GenreMvt = 3 THEN (
           SELECT fi.nom FROM MvtArt e
-          LEFT JOIN fouident fi ON fi.code = e.CODEFOU
+          LEFT JOIN fouident fi ON fi.code = TRIM(e.CODEFOU)
           WHERE e.ArtNoId = m.ArtNoId AND e.Site = m.Site
-            AND e.GenreMvt = 1 AND e.CODEFOU IS NOT NULL AND e.CODEFOU != ''
+            AND e.GenreMvt = 1 AND e.CODEFOU IS NOT NULL AND TRIM(e.CODEFOU) != ''
             AND e.DatMvt <= m.DatMvt
           ORDER BY e.DatMvt DESC LIMIT 1
         ) ELSE (
           SELECT fi2.nom FROM fouident fi2
-          WHERE fi2.code = m.CODEFOU
+          WHERE fi2.code = TRIM(m.CODEFOU)
         ) END AS nom_fournisseur_reel
       FROM MvtArt m
       JOIN ARTICLES a ON a.NO_ID = m.ArtNoId

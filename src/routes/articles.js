@@ -275,11 +275,11 @@ router.get('/:id/dernier-fournisseur', async (req, res) => {
         m.QteMvt       AS qte_entree,
         m.Prmp         AS prmp
       FROM MvtArt m
-      LEFT JOIN fouident fi ON fi.code = m.CODEFOU
+      LEFT JOIN fouident fi ON fi.code = TRIM(m.CODEFOU)
       WHERE m.ArtNoId = $1
         AND m.GenreMvt = 1
+        AND TRIM(m.CODEFOU) != ''
         AND m.CODEFOU IS NOT NULL
-        AND m.CODEFOU != ''
         AND ($2 = '' OR m.Site LIKE $2)
       ORDER BY m.Site, m.DatMvt DESC
     `, [req.params.id, `%${site}%`]);
