@@ -51,7 +51,27 @@ router.get('/articles', async (req, res) => {
         a.CODEIN, a.LIBELLE1,
         m.LibMvt, m.GenreMvt, m.QteMvt, m.ValMvt,
         m.MntMvtHt, m.MntMvtTTC, m.MargeMvt,
-        m.QteStock, m.Prmp, m.ValStock, m.CODEFOU
+        m.QteStock, m.Prmp, m.ValStock,
+        m.CODEFOU AS codefou_mouvement,
+        -- Pour les ventes (GenreMvt=3), le vrai fournisseur = dernière entrée avant cette vente
+        CASE WHEN m.GenreMvt = 3 THEN (
+          SELECT e.CODEFOU FROM MvtArt e
+          WHERE e.ArtNoId = m.ArtNoId AND e.Site = m.Site
+            AND e.GenreMvt = 1 AND e.CODEFOU IS NOT NULL AND e.CODEFOU != ''
+            AND e.DatMvt <= m.DatMvt
+          ORDER BY e.DatMvt DESC LIMIT 1
+        ) ELSE m.CODEFOU END AS codefou_reel,
+        CASE WHEN m.GenreMvt = 3 THEN (
+          SELECT fa.RAISONSOCIALE FROM MvtArt e
+          LEFT JOIN FOUADR1 fa ON fa.CODE = e.CODEFOU AND fa.SIT_CODE = '000'
+          WHERE e.ArtNoId = m.ArtNoId AND e.Site = m.Site
+            AND e.GenreMvt = 1 AND e.CODEFOU IS NOT NULL AND e.CODEFOU != ''
+            AND e.DatMvt <= m.DatMvt
+          ORDER BY e.DatMvt DESC LIMIT 1
+        ) ELSE (
+          SELECT fa2.RAISONSOCIALE FROM FOUADR1 fa2
+          WHERE fa2.CODE = m.CODEFOU AND fa2.SIT_CODE = '000'
+        ) END AS nom_fournisseur_reel
       FROM MvtArt m
       JOIN ARTICLES a ON a.NO_ID = m.ArtNoId
       WHERE m.DatMvt BETWEEN $1 AND $2

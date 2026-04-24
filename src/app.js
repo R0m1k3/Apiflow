@@ -58,6 +58,7 @@ app.listen(PORT, () => {
   console.log('  GET /api/articles[?search=&codein=&ean=&codefou=&actif=&page=&limit=]');
   console.log('  GET /api/articles/:id');
   console.log('  GET /api/articles/:id/referentiel');
+  console.log('  GET /api/articles/:id/dernier-fournisseur[?site=]');
   console.log('  GET /api/articles/:id/mouvements');
   console.log('  GET /api/fournisseurs[?search=]');
   console.log('  GET /api/fournisseurs/:code/articles');

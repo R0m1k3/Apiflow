@@ -258,6 +258,38 @@ router.get('/:id/referentiel', async (req, res) => {
   }
 });
 
+// GET /api/articles/:id/dernier-fournisseur?site=
+// Retourne le fournisseur réel (dernière entrée en stock GenreMvt=1) par site
+// C'est le seul moyen fiable d'identifier qui a livré le produit actuellement en rayon
+router.get('/:id/dernier-fournisseur', async (req, res) => {
+  try {
+    const pool = getPool();
+    const { site = '' } = req.query;
+
+    const result = await pool.query(`
+      SELECT DISTINCT ON (m.Site)
+        m.Site,
+        m.DatMvt        AS date_derniere_entree,
+        m.CODEFOU       AS codefou,
+        fa.RAISONSOCIALE AS nom_fournisseur,
+        m.QteMvt        AS qte_entree,
+        m.Prmp          AS prmp
+      FROM MvtArt m
+      LEFT JOIN FOUADR1 fa ON fa.CODE = m.CODEFOU AND fa.SIT_CODE = '000'
+      WHERE m.ArtNoId = $1
+        AND m.GenreMvt = 1
+        AND m.CODEFOU IS NOT NULL
+        AND m.CODEFOU != ''
+        AND ($2 = '' OR m.Site LIKE $2)
+      ORDER BY m.Site, m.DatMvt DESC
+    `, [req.params.id, `%${site}%`]);
+
+    res.json({ artnoid: req.params.id, fournisseurs_par_site: result.rows });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // GET /api/articles/:id/mouvements?dateDebut=&dateFin=&site=&page=&limit=
 router.get('/:id/mouvements', async (req, res) => {
   try {
