@@ -11,7 +11,7 @@ router.get('/', async (req, res) => {
     const result = await pool.query(`
       SELECT
         f.CODE AS CODEFOU,
-        MAX(fa.RAISONSOCIALE) AS NOM,
+        MAX(fi.nom) AS NOM,
         MAX(fa.ADRLIGNE1) AS ADRESSE,
         MAX(fa.TELEPHONE) AS TELEPHONE,
         MAX(fa.EMAIL) AS EMAIL,
@@ -21,6 +21,7 @@ router.get('/', async (req, res) => {
         SUM(CASE WHEN f.SUSPENDU IS NULL THEN 1 ELSE 0 END) AS NB_ACTIFS,
         SUM(CASE WHEN f.SUSPENDU IS NOT NULL THEN 1 ELSE 0 END) AS NB_SUSPENDUS
       FROM ARTFOU1 f
+      LEFT JOIN fouident fi ON fi.code = f.CODE
       LEFT JOIN FOUADR1 fa ON fa.CODE = f.CODE AND fa.SIT_CODE = '000'
       WHERE f.CODE LIKE $1
       GROUP BY f.CODE

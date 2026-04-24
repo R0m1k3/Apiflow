@@ -269,13 +269,13 @@ router.get('/:id/dernier-fournisseur', async (req, res) => {
     const result = await pool.query(`
       SELECT DISTINCT ON (m.Site)
         m.Site,
-        m.DatMvt        AS date_derniere_entree,
-        m.CODEFOU       AS codefou,
-        fa.RAISONSOCIALE AS nom_fournisseur,
-        m.QteMvt        AS qte_entree,
-        m.Prmp          AS prmp
+        m.DatMvt       AS date_derniere_entree,
+        m.CODEFOU      AS codefou,
+        fi.nom         AS nom_fournisseur,
+        m.QteMvt       AS qte_entree,
+        m.Prmp         AS prmp
       FROM MvtArt m
-      LEFT JOIN FOUADR1 fa ON fa.CODE = m.CODEFOU AND fa.SIT_CODE = '000'
+      LEFT JOIN fouident fi ON fi.code = m.CODEFOU
       WHERE m.ArtNoId = $1
         AND m.GenreMvt = 1
         AND m.CODEFOU IS NOT NULL

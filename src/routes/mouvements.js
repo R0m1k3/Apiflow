@@ -62,15 +62,15 @@ router.get('/articles', async (req, res) => {
           ORDER BY e.DatMvt DESC LIMIT 1
         ) ELSE m.CODEFOU END AS codefou_reel,
         CASE WHEN m.GenreMvt = 3 THEN (
-          SELECT fa.RAISONSOCIALE FROM MvtArt e
-          LEFT JOIN FOUADR1 fa ON fa.CODE = e.CODEFOU AND fa.SIT_CODE = '000'
+          SELECT fi.nom FROM MvtArt e
+          LEFT JOIN fouident fi ON fi.code = e.CODEFOU
           WHERE e.ArtNoId = m.ArtNoId AND e.Site = m.Site
             AND e.GenreMvt = 1 AND e.CODEFOU IS NOT NULL AND e.CODEFOU != ''
             AND e.DatMvt <= m.DatMvt
           ORDER BY e.DatMvt DESC LIMIT 1
         ) ELSE (
-          SELECT fa2.RAISONSOCIALE FROM FOUADR1 fa2
-          WHERE fa2.CODE = m.CODEFOU AND fa2.SIT_CODE = '000'
+          SELECT fi2.nom FROM fouident fi2
+          WHERE fi2.code = m.CODEFOU
         ) END AS nom_fournisseur_reel
       FROM MvtArt m
       JOIN ARTICLES a ON a.NO_ID = m.ArtNoId
