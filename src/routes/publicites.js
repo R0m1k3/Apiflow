@@ -30,6 +30,16 @@ router.get('/', async (req, res) => {
     const fin = dateFin   || '2099-12-31';
 
     // Synthèse par pub (agrégat multi-sites)
+    const countResult = await pool.query(`
+      SELECT COUNT(*) AS total
+      FROM pub_ecoulement e
+      WHERE ($1 = '' OR e.tcr_libelle ILIKE '%' || $1 || '%' OR e.tcr_code ILIKE '%' || $1 || '%')
+        AND ($2 = '' OR e.site ILIKE '%' || $2 || '%')
+        AND e.tcrd_datedeb >= $3
+        AND e.tcrd_datedeb <= $4
+        ${statutFilter}
+    `, [search, site, deb, fin]);
+
     const result = await pool.query(`
       SELECT
         e.tcr_code,
@@ -72,11 +82,59 @@ router.get('/', async (req, res) => {
       LIMIT $5 OFFSET $6
     `, [search, site, deb, fin, limitNum, offset]);
 
+    const total = parseInt(countResult.rows[0].total);
     res.json({
-      page: pageNum,
-      limit: limitNum,
+      page:       pageNum,
+      limit:      limitNum,
+      total,
+      pages:      Math.ceil(total / limitNum),
       publicites: result.rows,
     });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /api/publicites/historique?search=&dateDebut=&dateFin=&statut=
+// Liste complète depuis pub_entetes (inclut les pubs sans données d'écoulement)
+router.get('/historique', async (req, res) => {
+  try {
+    const pool = getPool();
+    const { search = '', dateDebut = '', dateFin = '', statut = '' } = req.query;
+
+    const deb = dateDebut || '2000-01-01';
+    const fin = dateFin   || '2099-12-31';
+
+    let statutFilter = '';
+    if      (statut === 'en_cours') statutFilter = `AND CURRENT_DATE BETWEEN e.ent_datdeb AND e.ent_datfin`;
+    else if (statut === 'passees')  statutFilter = `AND e.ent_datfin < CURRENT_DATE`;
+    else if (statut === 'futures')  statutFilter = `AND e.ent_datdeb > CURRENT_DATE`;
+
+    const result = await pool.query(`
+      SELECT
+        e.ent_npub                                          AS tcr_code,
+        e.ent_titre                                         AS intitule,
+        e.ent_datdeb                                        AS date_debut,
+        e.ent_datfin                                        AS date_fin,
+        CASE
+          WHEN CURRENT_DATE BETWEEN e.ent_datdeb AND e.ent_datfin THEN 'en_cours'
+          WHEN e.ent_datfin < CURRENT_DATE                         THEN 'passee'
+          ELSE 'future'
+        END                                                 AS statut,
+        COUNT(DISTINCT ec.site)                             AS nb_sites,
+        SUM(ec.ca_pub_periode_pub)                          AS ca_total,
+        SUM(ec.qte_vendue_pub)                              AS qte_totale
+      FROM pub_entetes e
+      LEFT JOIN pub_ecoulement ec ON ec.tcr_code = e.ent_npub
+      WHERE ($1 = '' OR e.ent_titre ILIKE '%' || $1 || '%' OR e.ent_npub ILIKE '%' || $1 || '%')
+        AND e.ent_datdeb >= $2
+        AND e.ent_datdeb <= $3
+        ${statutFilter}
+      GROUP BY e.ent_npub, e.ent_titre, e.ent_datdeb, e.ent_datfin
+      ORDER BY e.ent_datdeb DESC
+    `, [search, deb, fin]);
+
+    res.json({ total: result.rows.length, publicites: result.rows });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
