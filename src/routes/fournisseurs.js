@@ -107,4 +107,42 @@ router.get('/:code/commandes', async (req, res) => {
   }
 });
 
+// GET /api/fournisseurs/:code/franco
+// Franco de port du fournisseur (fouport2.seuil en priorité, sinon foucad.franco)
+router.get('/:code/franco', async (req, res) => {
+  try {
+    const pool = getPool();
+
+    const result = await pool.query(`
+      WITH franco_port AS (
+        SELECT fp.code, MAX(fp2.seuil) AS seuil
+        FROM fouport fp
+        JOIN fouport2 fp2 ON fp2.fou_no_id = fp.no_id
+        WHERE fp.code = $1
+        GROUP BY fp.code
+      )
+      SELECT
+        fi.code,
+        fi.nom,
+        COALESCE(fp.seuil, fc.franco)  AS franco_ht,
+        fp.seuil                        AS franco_port,
+        fc.franco                       AS franco_general,
+        fc.actif,
+        fc.duree,
+        fc.unite
+      FROM fouident fi
+      LEFT JOIN foucad      fc ON fc.foucode = fi.code
+      LEFT JOIN franco_port fp ON fp.code    = fi.code
+      WHERE fi.code = $1
+    `, [req.params.code]);
+
+    if (!result.rows.length)
+      return res.status(404).json({ error: 'Fournisseur introuvable' });
+
+    res.json(result.rows[0]);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 module.exports = router;

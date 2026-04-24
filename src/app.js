@@ -63,6 +63,7 @@ app.listen(PORT, () => {
   console.log('  GET /api/fournisseurs[?search=]');
   console.log('  GET /api/fournisseurs/:code/articles');
   console.log('  GET /api/fournisseurs/:code/commandes');
+  console.log('  GET /api/fournisseurs/:code/franco');
   console.log('  GET /api/commandes[?dateDebut=&dateFin=&codefou=]');
   console.log('  GET /api/commandes/:noCommande');
   console.log('  GET /api/commandes/receptions/liste');
