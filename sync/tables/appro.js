@@ -22,6 +22,14 @@ const FOUCAD_COLS = [
   'montantcdeauto','datecdeauto','suividatecreation','suividatemodif',
 ];
 
+const FOUPORT_COLS = [
+  'no_id','code','sit_code','suividatecreation','suividatemodif',
+];
+
+const FOUPORT2_COLS = [
+  'fou_no_id','no_id','seuil','mode','valeur','suividatecreation','suividatemodif',
+];
+
 const PLAN_REAPPRO_COLS = [
   'id','magasin','codein','bu_no_id','stockmag','encours_palette_mag',
   'attente_prepa_mag','colis_rea','colis_ajout_web','stock_dispo',
@@ -169,6 +177,56 @@ async function syncAppro(force) {
   } catch (err) {
     await logSync(pg, 'foucad', 0, 'error', err.message);
     console.error(`[foucad] ERREUR: ${err.message}`);
+  }
+
+  // === FOUPORT (full refresh — conditions de port par fournisseur) ===
+  try {
+    const ms = await getMssql();
+    const res = await ms.request().query(`
+      SELECT NO_ID, CODE, SIT_CODE, SUIVIDATECREATION, SUIVIDATEMODIF
+      FROM FOUPORT
+    `);
+
+    const rows = res.recordset.map(r => ({
+      no_id:             r.NO_ID,
+      code:              r.CODE,
+      sit_code:          r.SIT_CODE ?? null,
+      suividatecreation: r.SUIVIDATECREATION,
+      suividatemodif:    r.SUIVIDATEMODIF,
+    }));
+
+    const count = await fullRefresh(pg, 'fouport', rows, FOUPORT_COLS);
+    await logSync(pg, 'fouport', count, 'ok');
+    console.log(`[fouport] ${count} lignes`);
+  } catch (err) {
+    await logSync(pg, 'fouport', 0, 'error', err.message);
+    console.error(`[fouport] ERREUR: ${err.message}`);
+  }
+
+  // === FOUPORT2 (full refresh — seuils de franco par fournisseur) ===
+  try {
+    const ms = await getMssql();
+    const res = await ms.request().query(`
+      SELECT FOU_NO_ID, NO_ID, SEUIL, MODE, VALEUR, SUIVIDATECREATION, SUIVIDATEMODIF
+      FROM FOUPORT2
+    `);
+
+    const rows = res.recordset.map(r => ({
+      fou_no_id:         r.FOU_NO_ID,
+      no_id:             r.NO_ID,
+      seuil:             r.SEUIL ?? null,
+      mode:              r.MODE ?? null,
+      valeur:            r.VALEUR ?? null,
+      suividatecreation: r.SUIVIDATECREATION,
+      suividatemodif:    r.SUIVIDATEMODIF,
+    }));
+
+    const count = await fullRefresh(pg, 'fouport2', rows, FOUPORT2_COLS);
+    await logSync(pg, 'fouport2', count, 'ok');
+    console.log(`[fouport2] ${count} lignes`);
+  } catch (err) {
+    await logSync(pg, 'fouport2', 0, 'error', err.message);
+    console.error(`[fouport2] ERREUR: ${err.message}`);
   }
 
   // === PLAN_REAPPRO (full refresh — état courant) ===
