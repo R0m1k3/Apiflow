@@ -91,33 +91,44 @@ router.get('/hitparade', async (req, res) => {
 });
 
 // GET /api/performance/ca/nomenclature?dateDebut=&dateFin=&site=&niveau=
+// Articles sont stockés au niveau 3. Pour niveau=1 ou 2, on remonte via chemin_pere (format "noid_niv1.noid_niv2").
 router.get('/ca/nomenclature', async (req, res) => {
   try {
     const pool = getPool();
     const { dateDebut = '2024-01-01', dateFin = '2099-12-31', site = '', niveau = 1 } = req.query;
+    const niv = Math.max(1, Math.min(parseInt(niveau) || 1, 3));
+
+    // Pour niveau 1 ou 2 : remonter la hiérarchie via chemin_pere de la nomenclature niveau 3
+    // chemin_pere = "no_id_niv1.no_id_niv2" → SPLIT_PART(..., niv)
+    const joinNom = niv === 3
+      ? `JOIN NOMENCLATURE n ON n.NO_ID = a.NOM_NO_ID`
+      : `JOIN NOMENCLATURE n3 ON n3.NO_ID = a.NOM_NO_ID
+         JOIN NOMENCLATURE n  ON n.NO_ID = NULLIF(SPLIT_PART(n3.chemin_pere, '.', ${niv}), '')::bigint`;
 
     const result = await pool.query(`
       SELECT
-        n.CODE AS CODE_NOMEN,
+        n.CODE                                                         AS code_nomen,
         n.LIBELLE,
-        n.NIVEAU,
-        COUNT(DISTINCT m.ArtNoId) AS NB_ARTICLES,
-        SUM(m.QteMvt) AS QTE_VENDUE,
-        SUM(m.MntMvtHt) AS CA_HT,
-        SUM(m.MntMvtTTC) AS CA_TTC,
-        SUM(m.MargeMvt) AS MARGE
+        ${niv}                                                         AS niveau,
+        COUNT(DISTINCT m.ArtNoId)                                      AS nb_articles,
+        ABS(SUM(CASE WHEN m.mntmvtttc < 0 THEN m.qtemvt    ELSE 0 END)) AS qte_vendue,
+        ABS(SUM(CASE WHEN m.mntmvtttc < 0 THEN m.mntmvtht  ELSE 0 END)) AS ca_ht,
+        ABS(SUM(CASE WHEN m.mntmvtttc < 0 THEN m.mntmvtttc ELSE 0 END)) AS ca_ttc,
+        SUM(m.MargeMvt)                                                AS marge,
+        CASE WHEN SUM(m.mntmvtht) != 0
+          THEN ROUND(SUM(m.margemvt) / ABS(SUM(m.mntmvtht)) * 100, 2)
+          ELSE 0 END                                                   AS taux_marge
       FROM MvtArt m
       JOIN ARTICLES a ON a.NO_ID = m.ArtNoId
-      JOIN NOMENCLATURE n ON n.NO_ID = a.NOM_NO_ID
-      WHERE m.GenreMvt = 3
+      ${joinNom}
+      WHERE m.GenreMvt IN (3, 4, 9)
         AND m.DatMvt BETWEEN $1 AND $2
         AND m.Site LIKE $3
-        AND n.NIVEAU = $4
-      GROUP BY n.CODE, n.LIBELLE, n.NIVEAU
-      ORDER BY CA_TTC DESC
-    `, [dateDebut, dateFin, `%${site}%`, parseInt(niveau)]);
+      GROUP BY n.CODE, n.LIBELLE
+      ORDER BY ca_ttc DESC
+    `, [dateDebut, dateFin, `%${site}%`]);
 
-    res.json({ dateDebut, dateFin, niveau: parseInt(niveau), ca_par_nomenclature: result.rows });
+    res.json({ dateDebut, dateFin, niveau: niv, ca_par_nomenclature: result.rows });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
