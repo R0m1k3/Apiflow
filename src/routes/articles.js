@@ -54,7 +54,11 @@ router.get('/', async (req, res) => {
       LIMIT ${limitNum} OFFSET ${offsetNum}
     `, [`%${search}%`, `%${codein}%`, `%${ean}%`, `%${codefou}%`, actif]);
 
-    res.json({ page: pageNum, limit: limitNum, articles: result.rows });
+    const articles = result.rows.map(a => ({
+      ...a,
+      photo_url: a.codein ? `https://prod-api.lafoirfouille.fr/medias/${a.codein}-0-300Wx300H` : null,
+    }));
+    res.json({ page: pageNum, limit: limitNum, articles });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -110,8 +114,14 @@ router.get('/:id', async (req, res) => {
       ORDER BY f.PREFERENCE
     `, [req.params.id]);
 
+    const art = article.rows[0];
+    const codein = art.codein;
     res.json({
-      article: article.rows[0],
+      article: {
+        ...art,
+        photo_url: codein ? `https://prod-api.lafoirfouille.fr/medias/${codein}-0-300Wx300H` : null,
+        photo_url_large: codein ? `https://prod-api.lafoirfouille.fr/medias/${codein}-0-1200Wx1200H` : null,
+      },
       gtins: gtins.rows,
       stock: stock.rows,
       prix: prix.rows,
@@ -238,8 +248,14 @@ router.get('/:id/referentiel', async (req, res) => {
       ranking = rankRes.rows;
     } catch (e) { /* Table optionnelle */ }
 
+    const artRef = article.rows[0];
+    const codeinRef = artRef.codein;
     res.json({
-      article: article.rows[0],
+      article: {
+        ...artRef,
+        photo_url: codeinRef ? `https://prod-api.lafoirfouille.fr/medias/${codeinRef}-0-300Wx300H` : null,
+        photo_url_large: codeinRef ? `https://prod-api.lafoirfouille.fr/medias/${codeinRef}-0-1200Wx1200H` : null,
+      },
       gtins: gtins.rows,
       gammes: gammes.rows,
       ranking,
@@ -253,6 +269,28 @@ router.get('/:id/referentiel', async (req, res) => {
       performance: mvtAgreges.rows[0],
       notes,
     });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /api/articles/:id/photo?size=300 — redirect vers CDN lafoirfouille.fr
+router.get('/:id/photo', async (req, res) => {
+  try {
+    const pool = getPool();
+    const size = req.query.size === 'large' ? '1200Wx1200H' : '300Wx300H';
+
+    const result = await pool.query(
+      `SELECT a.CODEIN FROM ARTICLES a WHERE a.NO_ID = $1`,
+      [req.params.id]
+    );
+
+    if (!result.rows.length) return res.status(404).json({ error: 'Article introuvable' });
+
+    const codein = result.rows[0].codein;
+    if (!codein) return res.status(404).json({ error: 'Pas de code article' });
+
+    return res.redirect(302, `https://prod-api.lafoirfouille.fr/medias/${codein}-0-${size}`);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
