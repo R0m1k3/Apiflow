@@ -347,7 +347,8 @@ router.get('/:id/photo', async (req, res) => {
 
     res.setHeader('Content-Type', imgRes.headers.get('content-type') || 'image/jpeg');
     res.setHeader('Cache-Control', 'public, max-age=3600');
-    imgRes.body.pipe(res);
+    const { Readable } = require('stream');
+    Readable.fromWeb(imgRes.body).pipe(res);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
