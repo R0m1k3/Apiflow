@@ -13,6 +13,7 @@ const syncRouter        = require('./routes/sync');
 const rankingRouter       = require('./routes/ranking');
 const publicitesRouter    = require('./routes/publicites');
 const commandesAutoRouter = require('./routes/commandes-auto');
+const photosRouter        = require('./routes/photos');
 
 const app = express();
 app.use(express.json());
@@ -40,6 +41,7 @@ app.use('/api/sync',         syncRouter);
 app.use('/api/ranking',      rankingRouter);
 app.use('/api/publicites',      publicitesRouter);
 app.use('/api/commandes-auto',  commandesAutoRouter);
+app.use('/api/photos',         photosRouter);
 
 // 404
 app.use((req, res) => {

@@ -12,6 +12,13 @@ CREATE TABLE IF NOT EXISTS sync_log (
   error_msg    TEXT
 );
 
+-- Index photos lafoirfouille.fr (construit depuis les sitemaps)
+CREATE TABLE IF NOT EXISTS ff_photo_index (
+  photo_code   TEXT PRIMARY KEY,
+  product_url  TEXT NOT NULL,
+  indexed_at   TIMESTAMP DEFAULT NOW()
+);
+
 -- ============================================================
 -- Référentiel articles
 -- ============================================================

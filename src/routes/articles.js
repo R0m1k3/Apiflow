@@ -283,31 +283,30 @@ const photoCache = new Map();
 
 const FF_UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36';
 
-async function resolvePhotoUrl(code, size) {
+async function resolvePhotoUrl(pool, code, size) {
   const cacheKey = `${code}:${size}`;
   const cached = photoCache.get(cacheKey);
   if (cached && cached.expires > Date.now()) return cached.imageUrl;
 
-  // 1. Cherche la page produit via search lafoirfouille.fr
-  const searchRes = await fetch(`https://www.lafoirfouille.fr/FR/search?q=${code}`, {
-    headers: { 'User-Agent': FF_UA, 'Accept-Language': 'fr-FR,fr;q=0.9' },
-    redirect: 'follow',
-  });
-  const searchHtml = await searchRes.text();
+  // 1. Cherche l'URL produit dans l'index sitemap
+  const indexRow = await pool.query(
+    `SELECT product_url FROM ff_photo_index WHERE photo_code = $1`,
+    [code]
+  );
+  if (!indexRow.rows.length) return null;
 
-  // Extrait URL produit du HTML (SSR partiel possible)
-  const urlMatch = searchHtml.match(new RegExp(`(/[^"']*?/p/[^"']*?-${code}\\.html)`));
-  if (!urlMatch) return null;
+  const productPageUrl = indexRow.rows[0].product_url;
 
   // 2. Fetch page produit pour URL signée
-  const productRes = await fetch(`https://www.lafoirfouille.fr${urlMatch[1]}`, {
+  const productRes = await fetch(productPageUrl, {
     headers: { 'User-Agent': FF_UA, 'Accept-Language': 'fr-FR,fr;q=0.9' },
   });
+  if (!productRes.ok) return null;
   const productHtml = await productRes.text();
 
   // Extrait URL CDN signée (pattern: medias/{code}-0-{size}?context=...)
   const imgPattern = new RegExp(
-    `https://prod-api\\.lafoirfouille\\.fr/medias/${code}-0-${size}\\?context=[A-Za-z0-9+/=_-]+`
+    `https://prod-api\\.lafoirfouille\\.fr/medias/${code}-0-${size}\\?context=[A-Za-z0-9+/=_%-]+`
   );
   const imgMatch = productHtml.match(imgPattern);
   if (!imgMatch) return null;
@@ -336,7 +335,8 @@ router.get('/:id/photo', async (req, res) => {
     if (!nomphoto) return res.status(404).json({ error: 'Pas de photo pour cet article' });
 
     const code = nomphoto.replace(/\.[^.]+$/, '');
-    const imageUrl = await resolvePhotoUrl(code, size);
+    if (!/^\d{9,13}$/.test(code)) return res.status(404).json({ error: 'Format photo non supporté', nomphoto });
+    const imageUrl = await resolvePhotoUrl(pool, code, size);
 
     if (!imageUrl) return res.status(404).json({ error: 'Photo non trouvée sur lafoirfouille.fr', code });
 
