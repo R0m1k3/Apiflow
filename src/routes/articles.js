@@ -54,10 +54,14 @@ router.get('/', async (req, res) => {
       LIMIT ${limitNum} OFFSET ${offsetNum}
     `, [`%${search}%`, `%${codein}%`, `%${ean}%`, `%${codefou}%`, actif]);
 
-    const articles = result.rows.map(a => ({
-      ...a,
-      photo_url: a.codein ? `https://prod-api.lafoirfouille.fr/medias/${a.codein}-0-300Wx300H` : null,
-    }));
+    const articles = result.rows.map(a => {
+      const photoCode = a.nomphoto ? a.nomphoto.replace(/\.[^.]+$/, '') : null;
+      return {
+        ...a,
+        photo_url: photoCode ? `/api/articles/${a.no_id}/photo` : null,
+        photo_url_large: photoCode ? `/api/articles/${a.no_id}/photo?size=large` : null,
+      };
+    });
     res.json({ page: pageNum, limit: limitNum, articles });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -115,12 +119,12 @@ router.get('/:id', async (req, res) => {
     `, [req.params.id]);
 
     const art = article.rows[0];
-    const codein = art.codein;
+    const photoCode = art.nomphoto ? art.nomphoto.replace(/\.[^.]+$/, '') : null;
     res.json({
       article: {
         ...art,
-        photo_url: codein ? `https://prod-api.lafoirfouille.fr/medias/${codein}-0-300Wx300H` : null,
-        photo_url_large: codein ? `https://prod-api.lafoirfouille.fr/medias/${codein}-0-1200Wx1200H` : null,
+        photo_url: photoCode ? `/api/articles/${req.params.id}/photo` : null,
+        photo_url_large: photoCode ? `/api/articles/${req.params.id}/photo?size=large` : null,
       },
       gtins: gtins.rows,
       stock: stock.rows,
@@ -249,12 +253,12 @@ router.get('/:id/referentiel', async (req, res) => {
     } catch (e) { /* Table optionnelle */ }
 
     const artRef = article.rows[0];
-    const codeinRef = artRef.codein;
+    const photoCodeRef = artRef.nomphoto ? artRef.nomphoto.replace(/\.[^.]+$/, '') : null;
     res.json({
       article: {
         ...artRef,
-        photo_url: codeinRef ? `https://prod-api.lafoirfouille.fr/medias/${codeinRef}-0-300Wx300H` : null,
-        photo_url_large: codeinRef ? `https://prod-api.lafoirfouille.fr/medias/${codeinRef}-0-1200Wx1200H` : null,
+        photo_url: photoCodeRef ? `/api/articles/${id}/photo` : null,
+        photo_url_large: photoCodeRef ? `/api/articles/${id}/photo?size=large` : null,
       },
       gtins: gtins.rows,
       gammes: gammes.rows,
@@ -274,23 +278,76 @@ router.get('/:id/referentiel', async (req, res) => {
   }
 });
 
-// GET /api/articles/:id/photo?size=300 — redirect vers CDN lafoirfouille.fr
+// Cache mémoire : nomphoto_code -> { imageUrl, expires }
+const photoCache = new Map();
+
+const FF_UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36';
+
+async function resolvePhotoUrl(code, size) {
+  const cacheKey = `${code}:${size}`;
+  const cached = photoCache.get(cacheKey);
+  if (cached && cached.expires > Date.now()) return cached.imageUrl;
+
+  // 1. Cherche la page produit via search lafoirfouille.fr
+  const searchRes = await fetch(`https://www.lafoirfouille.fr/FR/search?q=${code}`, {
+    headers: { 'User-Agent': FF_UA, 'Accept-Language': 'fr-FR,fr;q=0.9' },
+    redirect: 'follow',
+  });
+  const searchHtml = await searchRes.text();
+
+  // Extrait URL produit du HTML (SSR partiel possible)
+  const urlMatch = searchHtml.match(new RegExp(`(/[^"']*?/p/[^"']*?-${code}\\.html)`));
+  if (!urlMatch) return null;
+
+  // 2. Fetch page produit pour URL signée
+  const productRes = await fetch(`https://www.lafoirfouille.fr${urlMatch[1]}`, {
+    headers: { 'User-Agent': FF_UA, 'Accept-Language': 'fr-FR,fr;q=0.9' },
+  });
+  const productHtml = await productRes.text();
+
+  // Extrait URL CDN signée (pattern: medias/{code}-0-{size}?context=...)
+  const imgPattern = new RegExp(
+    `https://prod-api\\.lafoirfouille\\.fr/medias/${code}-0-${size}\\?context=[A-Za-z0-9+/=_-]+`
+  );
+  const imgMatch = productHtml.match(imgPattern);
+  if (!imgMatch) return null;
+
+  const imageUrl = imgMatch[0].replace(/&amp;/g, '&');
+  photoCache.set(cacheKey, { imageUrl, expires: Date.now() + 3600_000 });
+  return imageUrl;
+}
+
+// GET /api/articles/:id/photo?size=large — proxy photo depuis lafoirfouille.fr
 router.get('/:id/photo', async (req, res) => {
   try {
     const pool = getPool();
     const size = req.query.size === 'large' ? '1200Wx1200H' : '300Wx300H';
 
     const result = await pool.query(
-      `SELECT a.CODEIN FROM ARTICLES a WHERE a.NO_ID = $1`,
+      `SELECT ai.NOMPHOTO FROM ARTICLES a
+       LEFT JOIN ARTICLE_INFOSUP ai ON ai.ARTNOID = a.NO_ID
+       WHERE a.NO_ID = $1`,
       [req.params.id]
     );
 
     if (!result.rows.length) return res.status(404).json({ error: 'Article introuvable' });
 
-    const codein = result.rows[0].codein;
-    if (!codein) return res.status(404).json({ error: 'Pas de code article' });
+    const nomphoto = result.rows[0].nomphoto;
+    if (!nomphoto) return res.status(404).json({ error: 'Pas de photo pour cet article' });
 
-    return res.redirect(302, `https://prod-api.lafoirfouille.fr/medias/${codein}-0-${size}`);
+    const code = nomphoto.replace(/\.[^.]+$/, '');
+    const imageUrl = await resolvePhotoUrl(code, size);
+
+    if (!imageUrl) return res.status(404).json({ error: 'Photo non trouvée sur lafoirfouille.fr', code });
+
+    // Proxy l'image (évite les problèmes CORS côté client)
+    const imgRes = await fetch(imageUrl, {
+      headers: { 'Referer': 'https://www.lafoirfouille.fr/', 'User-Agent': FF_UA },
+    });
+
+    res.setHeader('Content-Type', imgRes.headers.get('content-type') || 'image/jpeg');
+    res.setHeader('Cache-Control', 'public, max-age=3600');
+    imgRes.body.pipe(res);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
