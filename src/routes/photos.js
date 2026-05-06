@@ -36,7 +36,7 @@ async function indexSitemaps(pool) {
       const values = batch.map((r, j) => `($${j * 2 + 1}, $${j * 2 + 2})`).join(', ');
       const params = batch.flatMap(r => [r.code, r.url]);
       await pool.query(
-        `INSERT INTO ff_photo_index (photo_code, product_url, indexed_at)
+        `INSERT INTO ff_photo_index (photo_code, product_url)
          VALUES ${values}
          ON CONFLICT (photo_code) DO UPDATE
            SET product_url = EXCLUDED.product_url, indexed_at = NOW()`,
