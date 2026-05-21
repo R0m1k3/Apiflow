@@ -80,7 +80,7 @@ router.get('/hitparade', async (req, res) => {
         MAX(m.DatMvt) AS DERNIERE_VENTE
       FROM MvtArt m
       JOIN ARTICLES a ON a.NO_ID = m.ArtNoId
-      LEFT JOIN artfou1 af ON af.art_no_id = a.no_id AND af.preference = true
+      LEFT JOIN artfou1 af ON af.art_no_id = a.no_id AND af.preference = 1
       LEFT JOIN fouident fi ON fi.code = af.code
       WHERE m.GenreMvt IN (3, 4, 9)
         AND m.DatMvt BETWEEN $1 AND $2
@@ -168,7 +168,7 @@ router.get('/ca/fournisseur', async (req, res) => {
           ELSE 0 END AS taux_marge
       FROM mvtart m
       JOIN articles a ON a.no_id = m.artnoid
-      LEFT JOIN artfou1 af ON af.art_no_id = a.no_id AND af.preference = true
+      LEFT JOIN artfou1 af ON af.art_no_id = a.no_id AND af.preference = 1
       LEFT JOIN fouident fi ON fi.code = af.code
       WHERE m.genremvt = 3
         AND m.datmvt BETWEEN $1 AND $2
