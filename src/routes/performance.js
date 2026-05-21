@@ -45,20 +45,30 @@ router.get('/ca', async (req, res) => {
   }
 });
 
-// GET /api/performance/hitparade?dateDebut=&dateFin=&site=&limit=&groupBy=qte|ca|marge
+// GET /api/performance/hitparade?dateDebut=&dateFin=&site=&limit=&groupBy=qte|ca|marge&codefou=
 router.get('/hitparade', async (req, res) => {
   try {
     const pool = getPool();
-    const { dateDebut = '2024-01-01', dateFin = '2099-12-31', site = '', limit = 50, groupBy = 'ca' } = req.query;
+    const {
+      dateDebut = '2024-01-01', dateFin = '2099-12-31',
+      site = '', limit = 50, groupBy = 'ca', codefou = '',
+    } = req.query;
     const limitNum = Math.max(1, Math.min(parseInt(limit) || 50, 500));
 
     const orderCol = groupBy === 'qte' ? 'QTE_VENDUE' : groupBy === 'marge' ? 'MARGE' : 'CA_HT';
+
+    const fouFilter = codefou ? `AND af.code ILIKE $4` : '';
+    const params = codefou
+      ? [dateDebut, dateFin, `%${site}%`, `%${codefou}%`]
+      : [dateDebut, dateFin, `%${site}%`];
 
     const result = await pool.query(`
       SELECT
         a.CODEIN,
         a.LIBELLE1,
         m.Site,
+        af.code                                AS CODE_FOURNISSEUR,
+        COALESCE(fi.nom, af.code)              AS FOURNISSEUR,
         COUNT(*) AS NB_PASSAGES,
         SUM(CASE WHEN m.mntmvtttc < 0 THEN ABS(m.qtemvt)    ELSE 0 END) AS QTE_VENDUE,
         SUM(CASE WHEN m.mntmvtttc < 0 THEN ABS(m.mntmvtht)  ELSE 0 END) AS CA_HT,
@@ -70,18 +80,22 @@ router.get('/hitparade', async (req, res) => {
         MAX(m.DatMvt) AS DERNIERE_VENTE
       FROM MvtArt m
       JOIN ARTICLES a ON a.NO_ID = m.ArtNoId
+      LEFT JOIN artfou1 af ON af.art_no_id = a.no_id AND af.preference = true
+      LEFT JOIN fouident fi ON fi.code = af.code
       WHERE m.GenreMvt IN (3, 4, 9)
         AND m.DatMvt BETWEEN $1 AND $2
         AND m.Site LIKE $3
-      GROUP BY a.CODEIN, a.LIBELLE1, m.Site
+        ${fouFilter}
+      GROUP BY a.CODEIN, a.LIBELLE1, m.Site, af.code, fi.nom
       ORDER BY ${orderCol} DESC
       LIMIT ${limitNum}
-    `, [dateDebut, dateFin, `%${site}%`]);
+    `, params);
 
     res.json({
       dateDebut,
       dateFin,
       site: site || 'tous',
+      codefou: codefou || null,
       classementPar: groupBy,
       hitparade: result.rows,
     });

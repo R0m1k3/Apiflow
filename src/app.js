@@ -77,7 +77,7 @@ app.listen(PORT, () => {
   console.log('  GET /api/mouvements/reglements[?dateDebut=&dateFin=]');
   console.log('  GET /api/mouvements/synthese[?dateDebut=&dateFin=&site=]');
   console.log('  GET /api/performance/ca[?dateDebut=&dateFin=&site=&groupBy=jour|mois]');
-  console.log('  GET /api/performance/hitparade[?dateDebut=&dateFin=&site=&limit=&groupBy=qte|ca|marge]');
+  console.log('  GET /api/performance/hitparade[?dateDebut=&dateFin=&site=&limit=&groupBy=qte|ca|marge&codefou=]');
   console.log('  GET /api/performance/ca/nomenclature[?dateDebut=&dateFin=&site=&niveau=]');
   console.log('  GET /api/performance/ca/gamme[?dateDebut=&dateFin=&site=]');
   console.log('  GET /api/publicites[?search=&site=&dateDebut=&dateFin=&page=&limit=]');
