@@ -259,6 +259,53 @@ GET /api/articles/:id/mouvements
 
 ---
 
+### Dernier fournisseur par site
+
+```
+GET /api/articles/:id/dernier-fournisseur?site=
+```
+
+Retourne le fournisseur réel issu du dernier mouvement d'entrée en stock (`GenreMvt = 1`) pour chaque site. C'est le seul moyen fiable d'identifier quel fournisseur a livré l'exemplaire du produit actuellement en rayon.
+
+| Paramètre | Type   | Description                | Défaut |
+|-----------|--------|----------------------------|--------|
+| `site`    | string | Filtrer par site (partiel) | tous   |
+
+**Réponse** :
+```json
+{
+  "artnoid": "12345",
+  "fournisseurs_par_site": [
+    {
+      "site": "001",
+      "date_derniere_entree": "2026-05-15T00:00:00.000Z",
+      "codefou": "FOU01",
+      "nom_fournisseur": "MON FOURNISSEUR",
+      "qte_entree": 24,
+      "prmp": 10.20
+    }
+  ]
+}
+```
+
+---
+
+### Photo de produit (Proxy)
+
+```
+GET /api/articles/:id/photo?size=
+```
+
+Proxy et met en cache l'image du produit depuis `lafoirfouille.fr` en contournant les limitations de CORS.
+
+| Paramètre | Type   | Description                                       | Défaut   |
+|-----------|--------|---------------------------------------------------|----------|
+| `size`    | string | Taille de l'image (`large` pour 1200x1200H)       | 300Wx300H|
+
+**Réponse** : Le flux binaire de l'image avec un en-tête `Content-Type` approprié (ex: `image/jpeg`) et une directive de mise en cache HTTP.
+
+---
+
 ## Fournisseurs
 
 ### Liste des fournisseurs
@@ -326,6 +373,28 @@ GET /api/fournisseurs/:code/commandes
 | `dateFin`   | date | Date fin `YYYY-MM-DD`   | 2099-12-31 |
 | `page`      | int  | Numéro de page          | 1          |
 | `limit`     | int  | Max 1000                | 100        |
+
+---
+
+### Franco de port d'un fournisseur
+```
+GET /api/fournisseurs/:code/franco
+```
+Retourne le seuil de franco de port configuré pour le fournisseur (priorité à la table `fouport2` via `fouport` par rapport à la table `foucad`).
+
+**Réponse** :
+```json
+{
+  "code": "FOU01",
+  "nom": "MON FOURNISSEUR SARL",
+  "franco_ht": 350.00,
+  "franco_port": 350.00,
+  "franco_general": 300.00,
+  "actif": "O",
+  "duree": 0,
+  "unite": null
+}
+```
 
 ---
 
@@ -736,6 +805,44 @@ GET /api/mouvements/synthese?dateDebut=&dateFin=&site=
 
 ---
 
+### Règlements de caisse
+```
+GET /api/mouvements/reglements
+```
+Liste l'ensemble des règlements et paiements de tickets de caisse de la table `MvtReg`.
+
+| Paramètre   | Type | Description              | Défaut     |
+|-------------|------|--------------------------|------------|
+| `dateDebut` | date | Date début `YYYY-MM-DD`  | 2024-01-01 |
+| `dateFin`   | date | Date fin `YYYY-MM-DD`    | 2099-12-31 |
+| `page`      | int  | Numéro de page           | 1          |
+| `limit`     | int  | Lignes max (max 1000)    | 100        |
+
+**Réponse** :
+```json
+{
+  "page": 1,
+  "limit": 100,
+  "reglements": [
+    {
+      "datmvt": "2026-05-28T14:30:00.000Z",
+      "codtick": "TK123456",
+      "codcartecli": "CARD789",
+      "coddev": "EUR",
+      "mntreg": 45.90,
+      "mntregdev": 45.90,
+      "clientnom": "DUPONT JEAN",
+      "echeance": null,
+      "reference": null,
+      "typereg": "CB",
+      "suividatecreation": "2026-05-28T14:31:00.000Z"
+    }
+  ]
+}
+```
+
+---
+
 ## Performance
 
 ### Chiffre d'affaires
@@ -787,16 +894,23 @@ GET /api/performance/hitparade
 | `site`      | string                | Filtrer par site               | tous       |
 | `limit`     | int                   | Nombre d'articles (max 500)    | 50         |
 | `groupBy`   | `ca` / `qte` / `marge`| Critère de classement          | `ca`       |
+| `codefou`   | string                | Filtrer par code fournisseur   | —          |
 
 **Réponse** :
 ```json
 {
+  "dateDebut": "2024-01-01",
+  "dateFin": "2099-12-31",
+  "site": "tous",
+  "codefou": null,
   "classementPar": "ca",
   "hitparade": [
     {
       "codein": "ABC123",
       "libelle1": "MON ARTICLE",
       "site": "001",
+      "code_fournisseur": "FOU01",
+      "fournisseur": "MON FOURNISSEUR",
       "nb_passages": 320,
       "qte_vendue": 640,
       "ca_ht": 5760.00,
@@ -840,7 +954,7 @@ GET /api/performance/ca/fournisseur?dateDebut=&dateFin=&site=
 }
 ```
 
-> La jointure se fait via `artfou1.preference = true` (fournisseur principal de l'article) → `fouident.code` pour le nom.
+> La jointure se fait via `artfou1.preference = 1` (fournisseur principal de l'article) → `fouident.code` pour le nom.
 
 ---
 
@@ -892,6 +1006,140 @@ GET /api/performance/ca/gamme?dateDebut=&dateFin=&site=
     }
   ]
 }
+```
+
+---
+
+### Tableau de bord quotidien (Dashboard)
+```
+GET /api/performance/dashboard
+```
+Retourne une synthèse complète du jour demandé (par rapport au même jour à N-1) ainsi que les 3 Top 10 (CA, Quantité et Marge) par site.
+
+| Paramètre | Type   | Description                                       | Défaut     |
+|-----------|--------|---------------------------------------------------|------------|
+| `date`    | date   | Date cible `YYYY-MM-DD`                           | hier       |
+| `site`    | string | Filtrer par site (facultatif)                     | tous       |
+
+**Réponse** :
+```json
+{
+  "date": "2026-03-20",
+  "date_n1": "2025-03-20",
+  "sites": [
+    {
+      "site": "001",
+      "ca_ttc": 12450.00,
+      "ca_ttc_n1": 11800.00,
+      "evol_ca": "+5.5%",
+      "trafic": 420,
+      "trafic_n1": 410,
+      "evol_trafic": "+2.4%"
+    }
+  ],
+  "top10_ca": [
+    {
+      "codein": "129632",
+      "libelle1": "ETUI 10 CARTES",
+      "site": "001",
+      "ca_ttc": 245.50,
+      "qte_vendue": 60,
+      "marge": 95.20
+    }
+  ],
+  "top10_qte": [
+    {
+      "codein": "129632",
+      "libelle1": "ETUI 10 CARTES",
+      "site": "001",
+      "ca_ttc": 245.50,
+      "qte_vendue": 60,
+      "marge": 95.20
+    }
+  ],
+  "top10_marge": [
+    {
+      "codein": "129632",
+      "libelle1": "ETUI 10 CARTES",
+      "site": "001",
+      "ca_ttc": 245.50,
+      "qte_vendue": 60,
+      "marge": 95.20
+    }
+  ]
+}
+```
+
+---
+
+## Publicités (Ecoulement)
+
+### Liste des publicités avec écoulement
+```
+GET /api/publicites
+```
+
+| Paramètre | Type | Description | Défaut |
+|---|---|---|---|
+| `search` | string | Recherche dans l'intitulé ou le code | — |
+| `site` | string | Filtrer par site | — |
+| `dateDebut` | date | `YYYY-MM-DD` | 2000-01-01 |
+| `dateFin` | date | `YYYY-MM-DD` | 2099-12-31 |
+| `statut` | string | `en_cours`, `passees`, `futures`, ou `toutes` | — |
+| `page` | int | Numéro de page | 1 |
+| `limit` | int | Lignes par page | 50 |
+
+### Historique des publicités (toutes les pubs)
+```
+GET /api/publicites/historique
+```
+Mêmes paramètres que `/api/publicites` (sauf site, page, limit). Retourne une liste complète incluant les publicités sans données d'écoulement.
+
+### Détail d'une publicité (synthèse par site + articles)
+```
+GET /api/publicites/:code?site=
+```
+Retourne la synthèse de la publicité par site ainsi que les données d'écoulement de chaque article.
+
+---
+
+## Commandes Automatiques
+
+### Propositions de commandes automatiques
+```
+GET /api/commandes-auto?site=&codefou=
+```
+Retourne les propositions de commandes auto agrégées par site et fournisseur, avec comparaison au franco de port.
+
+### Détail des articles proposés pour un fournisseur
+```
+GET /api/commandes-auto/:codefou?site=
+```
+Retourne le résumé (franco, quantités, montant) et le détail par article des propositions.
+
+---
+
+## Schéma de la Base de Données
+
+### Structure complète de la base
+```
+GET /api/schema
+```
+Retourne la structure complète de la base (tables et colonnes).
+
+### Liste des tables (avec nombre de lignes)
+```
+GET /api/schema/tables?search=
+```
+
+### Top tables (par volume)
+```
+GET /api/schema/top?limit=
+```
+
+### Colonnes d'une table spécifique
+```
+GET /api/schema/tables/:tableName
 ```
 
 ---
@@ -1050,6 +1298,41 @@ GET /api/sync/status
 | `stat_dispoperm` | Upsert | Nuit |
 | `phenix_quantite_conseille` | Refresh complet | Nuit |
 | `statopca` | Upsert (site+date) | Nuit |
+
+---
+
+## Photos (Indexation)
+
+### Re-indexation des photos
+```
+POST /api/photos/reindex
+```
+Déclenche de façon asynchrone l'analyse des sitemaps produits de `lafoirfouille.fr` pour extraire et associer les URLs des fiches produits aux codes photos dans la table `ff_photo_index`.
+
+**Réponse** :
+```json
+{
+  "indexed": 14258,
+  "elapsed_s": 32.5
+}
+```
+
+---
+
+### Statut de l'indexation
+```
+GET /api/photos/status
+```
+Retourne le nombre total de photos indexées, la date de la dernière indexation, et si une indexation est actuellement en cours.
+
+**Réponse** :
+```json
+{
+  "total": 14258,
+  "last_index": "2026-05-28T04:15:30.000Z",
+  "indexing_in_progress": false
+}
+```
 
 ---
 
