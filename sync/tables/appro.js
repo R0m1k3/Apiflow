@@ -171,7 +171,19 @@ async function syncAppro(force) {
       suividatemodif:    r.SUIVIDATEMODIF,
     }));
 
-    const count = await fullRefresh(pg, 'foucad', rows, FOUCAD_COLS);
+    // foucode est PK côté PostgreSQL mais la source FOUCAD peut renvoyer
+    // plusieurs lignes par FOUCODE → on déduplique en gardant la plus récente
+    // (suividatemodif), sinon l'INSERT viole foucad_pkey.
+    const byCode = new Map();
+    for (const row of rows) {
+      const prev = byCode.get(row.foucode);
+      if (!prev || (row.suividatemodif ?? 0) >= (prev.suividatemodif ?? 0)) {
+        byCode.set(row.foucode, row);
+      }
+    }
+    const dedupRows = [...byCode.values()];
+
+    const count = await fullRefresh(pg, 'foucad', dedupRows, FOUCAD_COLS);
     await logSync(pg, 'foucad', count, 'ok');
     console.log(`[foucad] ${count} lignes`);
   } catch (err) {
