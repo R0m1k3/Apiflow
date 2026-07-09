@@ -32,8 +32,16 @@ GET /api/articles
 | `ean`     | string | EAN / GTIN                           | —      |
 | `codefou` | string | Code fournisseur (partiel)           | —      |
 | `actif`   | `1`/`0`| `1` = actif, `0` = suspendu         | —      |
+| `artcentrale` | string | Code centrale (partiel)          | —      |
+| `has_artcentrale` | `1`/`0` | `1` = référencé centrale, `0` = non référencé | — |
 | `page`    | int    | Numéro de page                       | 1      |
 | `limit`   | int    | Lignes par page (max 500)            | 50     |
+
+> **Code centrale** (`artcentrale`) : identifiant LaFoir'Fouille sur 11 chiffres, préfixe `1000x`
+> (ex. `10000137005`). Seuls les produits référencés par la centrale en possèdent un —
+> environ 355 800 articles sur 427 700. Pour les autres, le champ vaut `null`.
+> `has_artcentrale=1` ne retient que les codes conformes : quelques valeurs parasites
+> (`10000`, `10000192289P`) ont le bon préfixe mais pas la bonne longueur, et sont exclues.
 
 **Réponse** :
 ```json
@@ -54,6 +62,7 @@ GET /api/articles
       "suspendu": null,
       "suividatecreation": "2020-01-15T00:00:00.000Z",
       "suividatemodif": "2024-06-01T00:00:00.000Z",
+      "artcentrale": "10000137005",
       "prix_vente_mini": 15.00,
       "prix_vente_maxi": 25.00,
       "eco_ttc": 0.10,
@@ -85,7 +94,7 @@ GET /api/articles/:id
 **Réponse** :
 ```json
 {
-  "article": { "no_id": 12345, "codein": "...", "libelle1": "...", "pa": 10.50, "..." : "..." },
+  "article": { "no_id": 12345, "codein": "...", "libelle1": "...", "artcentrale": "10000137005", "pa": 10.50, "..." : "..." },
   "gtins": [
     { "gtin": "3760000000001", "preferentiel": 1 }
   ],

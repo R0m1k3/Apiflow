@@ -44,7 +44,7 @@ async function syncArticles(force) {
       suividatecreation: r.SUIVIDATECREATION,
       suividatemodif:    r.SUIVIDATEMODIF,
       nom_no_id:         r.NOM_NO_ID,
-      artcentrale:       r.ARTCENTRALE ?? null,
+      artcentrale:       safeStr(r.ARTCENTRALE),
     }));
 
     const count = await batchUpsert(pg, 'articles', rows, ['no_id'], ARTICLES_COLS);

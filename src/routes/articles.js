@@ -2,11 +2,12 @@ const express = require('express');
 const router = express.Router();
 const { getPool } = require('../config/database');
 
-// GET /api/articles?search=&codein=&ean=&actif=&codefou=&page=&limit=
+// GET /api/articles?search=&codein=&ean=&actif=&codefou=&artcentrale=&has_artcentrale=&page=&limit=
 router.get('/', async (req, res) => {
   try {
     const pool = getPool();
-    const { search = '', codein = '', ean = '', actif = '', codefou = '', page = 1, limit = 50 } = req.query;
+    const { search = '', codein = '', ean = '', actif = '', codefou = '',
+            artcentrale = '', has_artcentrale = '', page = 1, limit = 50 } = req.query;
     const pageNum  = Math.max(1, parseInt(page)  || 1);
     const limitNum = Math.max(1, Math.min(parseInt(limit) || 50, 500));
     const offsetNum = (pageNum - 1) * limitNum;
@@ -16,6 +17,7 @@ router.get('/', async (req, res) => {
         a.NO_ID, a.CODEIN, a.LIBELLE1, a.LIBELLE2, a.LIB_TICKET,
         a.TAX_CODE, a.ACH_CODE, a.UTILISABLE, a.ACTIF, a.SUSPENDU,
         a.SUIVIDATECREATION, a.SUIVIDATEMODIF,
+        NULLIF(TRIM(a.ARTCENTRALE), '') AS ARTCENTRALE,
         ai.PRIX_VENTE_MINI, ai.PRIX_VENTE_MAXI, ai.ECO_TTC,
         ai.ON_WEB, ai.INTERDIT_REMISE, ai.NOMPHOTO,
         ai.DATEDEBVENTE, ai.DATEFINVENTE,
@@ -50,9 +52,22 @@ router.get('/', async (req, res) => {
         AND ($4 = '%%' OR EXISTS (
           SELECT 1 FROM ARTFOU1 f WHERE f.ART_NO_ID = a.NO_ID AND f.CODE LIKE $4
         ))
+        AND ($6 = '%%' OR TRIM(a.ARTCENTRALE) LIKE $6)
+        -- code centrale LaFoir'Fouille : préfixe 1000x sur 11 chiffres.
+        -- COALESCE car les articles non référencés valent '' ou NULL.
+        AND ($7 = '' OR (
+          $7 = '1' AND TRIM(COALESCE(a.ARTCENTRALE, '')) LIKE '1000%'
+                   AND LENGTH(TRIM(COALESCE(a.ARTCENTRALE, ''))) = 11
+        ) OR (
+          $7 = '0' AND NOT (
+            TRIM(COALESCE(a.ARTCENTRALE, '')) LIKE '1000%'
+            AND LENGTH(TRIM(COALESCE(a.ARTCENTRALE, ''))) = 11
+          )
+        ))
       ORDER BY a.LIBELLE1
       LIMIT ${limitNum} OFFSET ${offsetNum}
-    `, [`%${search}%`, `%${codein}%`, `%${ean}%`, `%${codefou}%`, actif]);
+    `, [`%${search}%`, `%${codein}%`, `%${ean}%`, `%${codefou}%`, actif,
+        `%${artcentrale}%`, has_artcentrale]);
 
     const articles = result.rows.map(a => {
       const photoCode = a.nomphoto ? a.nomphoto.replace(/\.[^.]+$/, '') : null;
@@ -123,6 +138,7 @@ router.get('/:id', async (req, res) => {
     res.json({
       article: {
         ...art,
+        artcentrale: art.artcentrale?.trim() || null,
         photo_url: photoCode ? `/api/articles/${req.params.id}/photo` : null,
         photo_url_large: photoCode ? `/api/articles/${req.params.id}/photo?size=large` : null,
       },
