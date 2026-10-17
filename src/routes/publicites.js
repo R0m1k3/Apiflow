@@ -1,46 +1,49 @@
 const express = require('express');
 const router = express.Router();
 const { getPool } = require('../config/database');
+const { parseText, parseEnum, parseCode, parsePagination, parseDateRange, likeContains } = require('../utils/params');
+const { SqlParams, dateRange, where } = require('../utils/sql');
+const { HttpError } = require('../utils/errors');
+
+const STATUTS = ['en_cours', 'passees', 'futures', 'toutes'];
+
+// Filtre de statut sur les colonnes début/fin données
+function statutFilter(statut, deb, fin) {
+  if (statut === 'en_cours') return `CURRENT_DATE BETWEEN ${deb} AND ${fin}`;
+  if (statut === 'passees')  return `${fin} < CURRENT_DATE`;
+  if (statut === 'futures')  return `${deb} > CURRENT_DATE`;
+  return null;
+}
 
 // GET /api/publicites?search=&site=&dateDebut=&dateFin=&statut=en_cours|passees|futures|toutes&page=&limit=
 router.get('/', async (req, res) => {
-  try {
-    const pool = getPool();
-    const {
-      search = '',
-      site = '',
-      dateDebut = '',
-      dateFin = '',
-      statut = '',
-      page = 1,
-      limit = 50,
-    } = req.query;
+  const q = req.query;
+  const search = parseText(q.search, 'search', { max: 100 });
+  const site   = parseText(q.site, 'site', { max: 20 });
+  const statut = parseEnum(q.statut, 'statut', STATUTS, { def: '' });
+  const { debut, fin } = parseDateRange(q, { defDebut: '2000-01-01', defFin: '2099-12-31' });
+  const { page, limit, offset } = parsePagination(q, { defLimit: 50, maxLimit: 500 });
 
-    const pageNum  = Math.max(1, parseInt(page) || 1);
-    const limitNum = Math.max(1, Math.min(parseInt(limit) || 50, 500));
-    const offset   = (pageNum - 1) * limitNum;
+  const p = new SqlParams();
+  const conds = [dateRange('e.tcrd_datedeb', p, debut, fin)];
+  if (search) {
+    const s = p.add(likeContains(search));
+    conds.push(`(e.tcr_libelle ILIKE ${s} OR e.tcr_code ILIKE ${s})`);
+  }
+  if (site) conds.push(`e.site = ${p.add(site)}`);
+  conds.push(statutFilter(statut, 'e.tcrd_datedeb', 'e.tcrd_datefin'));
+  const whereSql = where(conds);
+  const pool = getPool();
 
-    // Filtre statut
-    let statutFilter = '';
-    if      (statut === 'en_cours') statutFilter = `AND CURRENT_DATE BETWEEN e.tcrd_datedeb AND e.tcrd_datefin`;
-    else if (statut === 'passees')  statutFilter = `AND e.tcrd_datefin < CURRENT_DATE`;
-    else if (statut === 'futures')  statutFilter = `AND e.tcrd_datedeb > CURRENT_DATE`;
+  const countValues = [...p.values];
+  const limitPh = p.add(limit);
+  const offsetPh = p.add(offset);
 
-    const deb = dateDebut || '2000-01-01';
-    const fin = dateFin   || '2099-12-31';
-
-    // Synthèse par pub (agrégat multi-sites)
-    const countResult = await pool.query(`
-      SELECT COUNT(*) AS total
-      FROM pub_ecoulement e
-      WHERE ($1 = '' OR e.tcr_libelle ILIKE '%' || $1 || '%' OR e.tcr_code ILIKE '%' || $1 || '%')
-        AND ($2 = '' OR e.site ILIKE '%' || $2 || '%')
-        AND e.tcrd_datedeb >= $3
-        AND e.tcrd_datedeb <= $4
-        ${statutFilter}
-    `, [search, site, deb, fin]);
-
-    const result = await pool.query(`
+  const [countResult, result] = await Promise.all([
+    // Total (pour la pagination)
+    pool.query(`SELECT COUNT(*) AS total FROM pub_ecoulement e ${whereSql}`, countValues),
+    // Synthèse par pub (une ligne par pub × site)
+    pool.query(`
       SELECT
         e.tcr_code,
         e.tcr_libelle                                   AS intitule,
@@ -73,44 +76,39 @@ router.get('/', async (req, res) => {
          FROM pub_ecoulement_detail d
          WHERE d.tcr_code = e.tcr_code AND d.site = e.site)  AS nb_articles
       FROM pub_ecoulement e
-      WHERE ($1 = '' OR e.tcr_libelle ILIKE '%' || $1 || '%' OR e.tcr_code ILIKE '%' || $1 || '%')
-        AND ($2 = '' OR e.site ILIKE '%' || $2 || '%')
-        AND e.tcrd_datedeb >= $3
-        AND e.tcrd_datedeb <= $4
-        ${statutFilter}
+      ${whereSql}
       ORDER BY e.tcrd_datedeb DESC, e.tcr_code, e.site
-      LIMIT $5 OFFSET $6
-    `, [search, site, deb, fin, limitNum, offset]);
+      LIMIT ${limitPh} OFFSET ${offsetPh}
+    `, p.values),
+  ]);
 
-    const total = parseInt(countResult.rows[0].total);
-    res.json({
-      page:       pageNum,
-      limit:      limitNum,
-      total,
-      pages:      Math.ceil(total / limitNum),
-      publicites: result.rows,
-    });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
+  const total = parseInt(countResult.rows[0].total, 10);
+  res.json({
+    page,
+    limit,
+    total,
+    pages: Math.ceil(total / limit),
+    publicites: result.rows,
+  });
 });
 
 // GET /api/publicites/historique?search=&dateDebut=&dateFin=&statut=
 // Liste complète depuis pub_entetes (inclut les pubs sans données d'écoulement)
 router.get('/historique', async (req, res) => {
-  try {
-    const pool = getPool();
-    const { search = '', dateDebut = '', dateFin = '', statut = '' } = req.query;
+  const q = req.query;
+  const search = parseText(q.search, 'search', { max: 100 });
+  const statut = parseEnum(q.statut, 'statut', STATUTS, { def: '' });
+  const { debut, fin } = parseDateRange(q, { defDebut: '2000-01-01', defFin: '2099-12-31' });
 
-    const deb = dateDebut || '2000-01-01';
-    const fin = dateFin   || '2099-12-31';
+  const p = new SqlParams();
+  const conds = [dateRange('e.ent_datdeb', p, debut, fin)];
+  if (search) {
+    const s = p.add(likeContains(search));
+    conds.push(`(e.ent_titre ILIKE ${s} OR e.ent_npub ILIKE ${s})`);
+  }
+  conds.push(statutFilter(statut, 'e.ent_datdeb', 'e.ent_datfin'));
 
-    let statutFilter = '';
-    if      (statut === 'en_cours') statutFilter = `AND CURRENT_DATE BETWEEN e.ent_datdeb AND e.ent_datfin`;
-    else if (statut === 'passees')  statutFilter = `AND e.ent_datfin < CURRENT_DATE`;
-    else if (statut === 'futures')  statutFilter = `AND e.ent_datdeb > CURRENT_DATE`;
-
-    const result = await pool.query(`
+  const result = await getPool().query(`
       SELECT
         e.ent_npub                                          AS tcr_code,
         e.ent_titre                                         AS intitule,
@@ -126,29 +124,26 @@ router.get('/historique', async (req, res) => {
         SUM(ec.qte_vendue_pub)                              AS qte_totale
       FROM pub_entetes e
       LEFT JOIN pub_ecoulement ec ON ec.tcr_code = e.ent_npub
-      WHERE ($1 = '' OR e.ent_titre ILIKE '%' || $1 || '%' OR e.ent_npub ILIKE '%' || $1 || '%')
-        AND e.ent_datdeb >= $2
-        AND e.ent_datdeb <= $3
-        ${statutFilter}
+      ${where(conds)}
       GROUP BY e.ent_npub, e.ent_titre, e.ent_datdeb, e.ent_datfin
       ORDER BY e.ent_datdeb DESC
-    `, [search, deb, fin]);
+    `, p.values);
 
-    res.json({ total: result.rows.length, publicites: result.rows });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
+  res.json({ total: result.rows.length, publicites: result.rows });
 });
 
 // GET /api/publicites/:code — synthèse par site + articles
 router.get('/:code', async (req, res) => {
-  try {
-    const pool = getPool();
-    const { code } = req.params;
-    const { site = '' } = req.query;
+  const code = parseCode(req.params.code, 'code');
+  const site = parseText(req.query.site, 'site', { max: 20 });
+  const pool = getPool();
 
+  const p = new SqlParams([code]);
+  const siteFilter = site ? `AND site = ${p.add(site)}` : '';
+
+  const [synthese, articles] = await Promise.all([
     // Synthèse par site
-    const synthese = await pool.query(`
+    pool.query(`
       SELECT
         e.tcr_code,
         e.tcr_libelle                                   AS intitule,
@@ -173,17 +168,11 @@ router.get('/:code', async (req, res) => {
         ROUND(e.marge::NUMERIC, 4)                      AS marge,
         ROUND(e.taux_marge::NUMERIC, 2)                 AS taux_marge
       FROM pub_ecoulement e
-      WHERE e.tcr_code = $1
-        AND ($2 = '' OR e.site ILIKE '%' || $2 || '%')
+      WHERE e.tcr_code = $1 ${siteFilter}
       ORDER BY e.site
-    `, [code, site]);
-
-    if (!synthese.rows.length) {
-      return res.status(404).json({ error: 'Publication introuvable' });
-    }
-
+    `, p.values),
     // Articles de la pub
-    const articles = await pool.query(`
+    pool.query(`
       SELECT
         d.site,
         d.artnoid,
@@ -206,23 +195,23 @@ router.get('/:code', async (req, res) => {
         ROUND(d.marge::NUMERIC, 4)                AS marge,
         ROUND(d.taux_marge::NUMERIC, 2)           AS taux_marge
       FROM pub_ecoulement_detail d
-      WHERE d.tcr_code = $1
-        AND ($2 = '' OR d.site ILIKE '%' || $2 || '%')
-      ORDER BY d.site, d.ca_pub_periode_pub DESC
-    `, [code, site]);
+      WHERE d.tcr_code = $1 ${siteFilter}
+      ORDER BY d.site, d.ca_pub_periode_pub DESC NULLS LAST
+    `, p.values),
+  ]);
 
-    res.json({
-      tcr_code:   synthese.rows[0].tcr_code,
-      intitule:   synthese.rows[0].intitule,
-      date_debut: synthese.rows[0].date_debut,
-      date_fin:   synthese.rows[0].date_fin,
-      datecalcul: synthese.rows[0].datecalcul,
-      synthese_par_site: synthese.rows,
-      articles: articles.rows,
-    });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
+  if (!synthese.rows.length) throw new HttpError(404, 'Publication introuvable');
+
+  const s0 = synthese.rows[0];
+  res.json({
+    tcr_code:   s0.tcr_code,
+    intitule:   s0.intitule,
+    date_debut: s0.date_debut,
+    date_fin:   s0.date_fin,
+    datecalcul: s0.datecalcul,
+    synthese_par_site: synthese.rows,
+    articles: articles.rows,
+  });
 });
 
 module.exports = router;

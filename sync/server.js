@@ -3,6 +3,7 @@
  */
 'use strict';
 const express = require('express');
+const crypto  = require('crypto');
 const { getPg } = require('./db');
 
 const app  = express();
@@ -15,11 +16,6 @@ const state = {
   lastError: null,
 };
 
-const TABLES_ORDER = [
-  'referentiel', 'articles', 'fournisseurs', 'stock', 'mouvements', 'statopca', 'commandes',
-  'ranking', 'stat_dispoperm', 'phenix_quantite_conseille', 'appro'
-];
-const TABLES_TOTAL = TABLES_ORDER.length;
 
 // Buffer des 300 dernières lignes de log
 const logBuffer = [];
@@ -35,12 +31,12 @@ console.log   = (...a) => { pushLog(a.join(' '), 'info');  _log(...a); };
 console.error = (...a) => { pushLog(a.join(' '), 'error'); _err(...a); };
 
 // Appelé depuis index.js avant/après chaque groupe de tables
-function setProgress(tableName, index) {
+function setProgress(tableName, index, total) {
   state.progress = {
     current:   tableName,
     index:     index,          // 1-based
-    total:     TABLES_TOTAL,
-    pct:       Math.round((index / TABLES_TOTAL) * 100),
+    total:     total,
+    pct:       Math.round((index / total) * 100),
     startedAt: state.progress?.startedAt || new Date().toISOString(),
   };
 }
@@ -50,9 +46,50 @@ function clearProgress() {
 
 // Fn sync enregistrée depuis index.js
 let syncAllFn = null;
-function registerSyncFn(fn) { syncAllFn = fn; }
+let cronExpr  = '45 6 * * *';
+function registerSyncFn(fn, cron) { syncAllFn = fn; if (cron) cronExpr = cron; }
 function setSyncRunning(val) { state.running = val; }
 function isSyncRunning()     { return state.running; }
+
+// ── Sécurité ─────────────────────────────────────────────────
+app.disable('x-powered-by');
+
+// Healthcheck Docker (sans authentification, ne divulgue rien)
+app.get('/healthz', (req, res) => res.json({ ok: true }));
+
+/**
+ * Authentification HTTP Basic : DASHBOARD_USER / DASHBOARD_PASSWORD.
+ * Sans ces variables, le dashboard est désactivé (il permet de lancer une sync
+ * complète et affiche les logs : il ne doit jamais être ouvert sans mot de passe).
+ */
+function safeEqual(a, b) {
+  const ha = crypto.createHash('sha256').update(String(a)).digest();
+  const hb = crypto.createHash('sha256').update(String(b)).digest();
+  return crypto.timingSafeEqual(ha, hb);
+}
+app.use((req, res, next) => {
+  const user = process.env.DASHBOARD_USER;
+  const pass = process.env.DASHBOARD_PASSWORD;
+  if (!user || !pass) {
+    return res.status(503).type('text').send('Dashboard désactivé : définir DASHBOARD_USER et DASHBOARD_PASSWORD');
+  }
+  const m = (req.headers.authorization || '').match(/^Basic (.+)$/);
+  if (m) {
+    const [u, ...rest] = Buffer.from(m[1], 'base64').toString('utf8').split(':');
+    if (safeEqual(u, user) && safeEqual(rest.join(':'), pass)) return next();
+  }
+  res.set('WWW-Authenticate', 'Basic realm="sync", charset="UTF-8"');
+  return res.status(401).type('text').send('Authentification requise');
+});
+app.use((req, res, next) => {
+  res.set({
+    'X-Content-Type-Options': 'nosniff',
+    'X-Frame-Options': 'DENY',
+    'Referrer-Policy': 'no-referrer',
+    'Content-Security-Policy': "default-src 'self'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src 'self'; frame-ancestors 'none'",
+  });
+  next();
+});
 
 // ── Routes API ───────────────────────────────────────────────
 app.use(express.json());
@@ -71,7 +108,8 @@ app.get('/api/status', async (req, res) => {
       tables:   rows,
     });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    console.error('[dashboard] /api/status :', err.message);
+    res.status(500).json({ error: 'Erreur lecture sync_log' });
   }
 });
 
@@ -81,27 +119,43 @@ app.get('/api/logs', (req, res) => {
   res.json(logBuffer.slice(-limit));
 });
 
-// Prochain cron
+// Prochain cron (expression quotidienne « m h * * * », heure de Paris)
+function parisParts(d) {
+  const f = new Intl.DateTimeFormat('en-GB', {
+    timeZone: 'Europe/Paris', year: 'numeric', month: '2-digit', day: '2-digit',
+    hour: '2-digit', minute: '2-digit', hourCycle: 'h23',
+  }).formatToParts(d);
+  const g = (t) => Number(f.find((p) => p.type === t).value);
+  return { y: g('year'), mo: g('month'), d: g('day'), h: g('hour'), mi: g('minute') };
+}
+function nextRun(expr, now = new Date()) {
+  const m = String(expr).trim().match(/^(\d{1,2})\s+(\d{1,2})\s+\*\s+\*\s+\*$/);
+  if (!m) return null;
+  const min = Number(m[1]);
+  const hour = Number(m[2]);
+  for (let add = 0; add <= 2; add++) {
+    const p = parisParts(new Date(now.getTime() + add * 86400e3));
+    // Instant UTC « naïf » puis correction du décalage horaire de Paris
+    let guess = new Date(Date.UTC(p.y, p.mo - 1, p.d, hour, min));
+    const q = parisParts(guess);
+    guess = new Date(guess.getTime() - ((q.h - hour) * 60 + (q.mi - min)) * 60e3);
+    if (guess > now) return guess;
+  }
+  return null;
+}
 app.get('/api/next', (req, res) => {
-  const now = new Date();
-  // Calcule le prochain 06:45 heure Europe/Paris
-  const parisOffset = (() => {
-    const u = new Date(now.toLocaleString('en-US', { timeZone: 'UTC' }));
-    const p = new Date(now.toLocaleString('en-US', { timeZone: 'Europe/Paris' }));
-    return (p - u) / 3600000; // heures
-  })();
-  const next = new Date(now);
-  next.setHours(6 - parisOffset, 45, 0, 0); // 06:45 Paris → heure UTC serveur
-  if (next <= now) next.setDate(next.getDate() + 1);
-  res.json({ next: next.toISOString() });
+  const next = nextRun(cronExpr);
+  res.json({ next: next ? next.toISOString() : null, cron: cronExpr });
 });
 
 // Déclencher sync manuelle
 app.post('/api/sync/run', async (req, res) => {
   if (state.running) return res.status(409).json({ error: 'Sync déjà en cours' });
   if (!syncAllFn)    return res.status(500).json({ error: 'syncAll non enregistré' });
-  res.json({ message: 'Sync lancée' });
-  syncAllFn(true).catch(err => console.error('Erreur sync manuelle:', err.message));
+  // force uniquement sur demande explicite (bouton « Forcer » avec confirmation)
+  const force = req.body?.force === true;
+  res.json({ message: force ? 'Sync complète forcée lancée' : 'Sync lancée' });
+  syncAllFn(force).catch(err => console.error('Erreur sync manuelle:', err.message));
 });
 
 // ── Dashboard HTML ───────────────────────────────────────────
@@ -178,7 +232,8 @@ tr:last-child td{border-bottom:none}
 </header>
 <main>
   <div class="actions">
-    <button id="btnSync" onclick="runSync()">▶ Lancer sync maintenant</button>
+    <button id="btnSync" onclick="runSync(false)">▶ Lancer sync maintenant</button>
+    <button id="btnForce" onclick="runSync(true)" title="Recharge 2 ans de mouvements et ignore les garde-fous de volume">⚠ Forcer sync complète</button>
     <button id="btnRefresh" onclick="refresh()">↺ Rafraîchir</button>
     <span id="msg"></span>
     <span id="nextSync"></span>
@@ -234,11 +289,15 @@ function renderProgress(progress, running){
     'En cours : ' + progress.current + ' | Durée : ' + elapsed + 's';
 }
 
+function esc(v){
+  return String(v ?? '').replace(/[&<>"']/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]));
+}
 function renderStatus(data){
   const badge = document.getElementById('statusBadge');
   badge.textContent = data.running ? 'En cours…' : 'Idle';
   badge.className   = 'badge ' + (data.running ? 'running' : 'idle');
   document.getElementById('btnSync').disabled = data.running;
+  document.getElementById('btnForce').disabled = data.running;
   renderProgress(data.progress, data.running);
 
   if(!data.tables.length){
@@ -248,10 +307,10 @@ function renderStatus(data){
   }
   document.getElementById('tableBody').innerHTML = data.tables.map(t => \`
     <tr>
-      <td><strong>\${t.table_name}</strong></td>
-      <td>\${fmtDate(t.last_sync)}</td>
-      <td>\${t.rows_synced ?? '—'}</td>
-      <td class="\${t.status==='ok'?'ok':'err'}">\${t.status ?? '—'}\${t.error_msg?' — '+t.error_msg:''}</td>
+      <td><strong>\${esc(t.table_name)}</strong></td>
+      <td>\${esc(fmtDate(t.last_sync))}</td>
+      <td>\${esc(t.rows_synced ?? '—')}</td>
+      <td class="\${t.status==='ok'?'ok':(t.status==='running'?'':'err')}">\${esc(t.status ?? '—')}\${t.error_msg?' — '+esc(t.error_msg):''}</td>
     </tr>
   \`).join('');
 }
@@ -261,8 +320,8 @@ function renderLogs(logs){
   if(!logs.length){ box.textContent = 'Aucun log.'; return; }
   const atBottom = box.scrollTop + box.clientHeight >= box.scrollHeight - 10;
   box.innerHTML = logs.map(l => \`
-    <div class="log-line \${l.level}">
-      <span class="ts">\${new Date(l.ts).toLocaleTimeString('fr-FR')}</span>\${l.msg}
+    <div class="log-line \${l.level==='error'?'error':'info'}">
+      <span class="ts">\${esc(new Date(l.ts).toLocaleTimeString('fr-FR'))}</span>\${esc(l.msg)}
     </div>
   \`).join('');
   if(atBottom) box.scrollTop = box.scrollHeight;
@@ -305,10 +364,11 @@ function copyLogs(){
   }
 }
 
-async function runSync(){
+async function runSync(force){
+  if(force && !confirm('Forcer une sync complète ? (recharge 2 ans de mouvements, ignore les garde-fous de volume)')) return;
   const msg = document.getElementById('msg');
   msg.style.display = 'none';
-  const r    = await fetch('/api/sync/run',{method:'POST'});
+  const r    = await fetch('/api/sync/run',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({force:!!force})});
   const data = await r.json();
   msg.textContent = r.ok ? '✓ ' + data.message : '✗ ' + data.error;
   msg.className   = r.ok ? 'ok' : 'err';

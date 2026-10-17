@@ -1,260 +1,238 @@
 const express = require('express');
 const router = express.Router();
 const { getPool } = require('../config/database');
+const {
+  parseText, parseEnum, parseId, parsePagination, parseDateRange, likeContains,
+} = require('../utils/params');
+const { SqlParams, dateRange, where } = require('../utils/sql');
+const { HttpError } = require('../utils/errors');
+const { photoCode, photoUrls, resolvePhotoUrl, proxyImage, PHOTO_SIZES } = require('../services/photos');
+
+// Code centrale LaFoir'Fouille conforme : préfixe 1000x sur 11 chiffres.
+// COALESCE car les articles non référencés valent '' ou NULL.
+const CENTRALE_CONFORME = `(TRIM(COALESCE(a.artcentrale, '')) LIKE '1000%'
+          AND LENGTH(TRIM(COALESCE(a.artcentrale, ''))) = 11)`;
 
 // GET /api/articles?search=&codein=&ean=&actif=&codefou=&artcentrale=&has_artcentrale=&page=&limit=
 router.get('/', async (req, res) => {
-  try {
-    const pool = getPool();
-    const { search = '', codein = '', ean = '', actif = '', codefou = '',
-            artcentrale = '', has_artcentrale = '', page = 1, limit = 50 } = req.query;
-    const pageNum  = Math.max(1, parseInt(page)  || 1);
-    const limitNum = Math.max(1, Math.min(parseInt(limit) || 50, 500));
-    const offsetNum = (pageNum - 1) * limitNum;
+  const q = req.query;
+  const search      = parseText(q.search, 'search');
+  const codein      = parseText(q.codein, 'codein', { max: 50 });
+  const ean         = parseText(q.ean, 'ean', { max: 50 });
+  const codefou     = parseText(q.codefou, 'codefou', { max: 50 });
+  const artcentrale = parseText(q.artcentrale, 'artcentrale', { max: 50 });
+  const actif       = parseEnum(q.actif, 'actif', ['1', '0'], { def: '' });
+  const hasCentrale = parseEnum(q.has_artcentrale, 'has_artcentrale', ['1', '0'], { def: '' });
+  const { page, limit, offset } = parsePagination(q, { defLimit: 50, maxLimit: 500 });
 
-    const result = await pool.query(`
+  const p = new SqlParams();
+  const conds = [];
+  if (search) {
+    const s = p.add(likeContains(search));
+    conds.push(`(a.libelle1 ILIKE ${s} OR a.libelle2 ILIKE ${s})`);
+  }
+  if (codein) conds.push(`a.codein ILIKE ${p.add(likeContains(codein))}`);
+  // Recherche sur n'importe quel GTIN de l'article (pas seulement le préférentiel)
+  if (ean) {
+    conds.push(`EXISTS (SELECT 1 FROM art_gtin ge
+          WHERE ge.idarticle = a.no_id AND ge.gtin LIKE ${p.add(likeContains(ean))})`);
+  }
+  if (actif === '1') conds.push('a.actif IS NOT NULL AND a.suspendu IS NULL');
+  if (actif === '0') conds.push('a.suspendu IS NOT NULL');
+  if (codefou) {
+    conds.push(`EXISTS (SELECT 1 FROM artfou1 f
+          WHERE f.art_no_id = a.no_id AND TRIM(f.code) ILIKE ${p.add(likeContains(codefou))})`);
+  }
+  if (artcentrale) conds.push(`TRIM(a.artcentrale) LIKE ${p.add(likeContains(artcentrale))}`);
+  if (hasCentrale === '1') conds.push(CENTRALE_CONFORME);
+  if (hasCentrale === '0') conds.push(`NOT ${CENTRALE_CONFORME}`);
+
+  const result = await getPool().query(`
       SELECT
-        a.NO_ID, a.CODEIN, a.LIBELLE1, a.LIBELLE2, a.LIB_TICKET,
-        a.TAX_CODE, a.ACH_CODE, a.UTILISABLE, a.ACTIF, a.SUSPENDU,
-        a.SUIVIDATECREATION, a.SUIVIDATEMODIF,
-        NULLIF(TRIM(a.ARTCENTRALE), '') AS ARTCENTRALE,
-        ai.PRIX_VENTE_MINI, ai.PRIX_VENTE_MAXI, ai.ECO_TTC,
-        ai.ON_WEB, ai.INTERDIT_REMISE, ai.NOMPHOTO,
-        ai.DATEDEBVENTE, ai.DATEFINVENTE,
-        pa.PA,
-        g.GTIN,
-        fpref.CODE   AS CODEFOU_PRINCIPAL,
-        fpref.NOM_FOU AS NOM_FOU_PRINCIPAL,
-        fpref.REF    AS REF_FOU_PRINCIPALE,
-        fpref.PCB    AS PCB_PRINCIPAL
-      FROM ARTICLES a
-      LEFT JOIN ARTICLE_INFOSUP ai ON ai.ARTNOID = a.NO_ID
-      LEFT JOIN Cube_PA pa ON pa.ArtNoId = a.NO_ID
-      LEFT JOIN ART_GTIN g ON g.IDARTICLE = a.NO_ID AND g.PREFERENTIEL = 1
+        a.no_id, a.codein, a.libelle1, a.libelle2, a.lib_ticket,
+        a.tax_code, a.ach_code, a.utilisable, a.actif, a.suspendu,
+        a.suividatecreation, a.suividatemodif,
+        NULLIF(TRIM(a.artcentrale), '') AS artcentrale,
+        ai.prix_vente_mini, ai.prix_vente_maxi, ai.eco_ttc,
+        ai.on_web, ai.interdit_remise, ai.nomphoto,
+        ai.datedebvente, ai.datefinvente,
+        pa.pa,
+        g.gtin,
+        fpref.code    AS codefou_principal,
+        fpref.nom_fou AS nom_fou_principal,
+        fpref.ref     AS ref_fou_principale,
+        fpref.pcb     AS pcb_principal
+      FROM articles a
+      LEFT JOIN article_infosup ai ON ai.artnoid = a.no_id
+      LEFT JOIN cube_pa pa ON pa.artnoid = a.no_id
       LEFT JOIN LATERAL (
-        SELECT f.CODE, f.REFERENCE AS REF, f.QTEUA AS PCB,
-               fi.nom AS NOM_FOU
-        FROM ARTFOU1 f
-        LEFT JOIN fouident fi ON fi.code = TRIM(f.CODE)
-        WHERE f.ART_NO_ID = a.NO_ID
-        ORDER BY f.PREFERENCE
+        SELECT gp.gtin FROM art_gtin gp
+        WHERE gp.idarticle = a.no_id AND gp.preferentiel = 1
+        ORDER BY gp.gtin
+        LIMIT 1
+      ) g ON true
+      LEFT JOIN LATERAL (
+        SELECT f.code, f.reference AS ref, f.qteua AS pcb, fi.nom AS nom_fou
+        FROM artfou1 f
+        LEFT JOIN fouident fi ON TRIM(fi.code) = TRIM(f.code)
+        WHERE f.art_no_id = a.no_id
+        ORDER BY f.preference NULLS LAST, f.no_id
         LIMIT 1
       ) fpref ON true
-      WHERE
-        ($1 = '%%' OR a.LIBELLE1 LIKE $1 OR a.LIBELLE2 LIKE $1)
-        AND ($2 = '%%' OR a.CODEIN LIKE $2)
-        AND ($3 = '%%' OR g.GTIN LIKE $3)
-        AND ($5 = '' OR (
-          $5 = '1' AND a.ACTIF IS NOT NULL AND a.SUSPENDU IS NULL
-        ) OR (
-          $5 = '0' AND a.SUSPENDU IS NOT NULL
-        ))
-        AND ($4 = '%%' OR EXISTS (
-          SELECT 1 FROM ARTFOU1 f WHERE f.ART_NO_ID = a.NO_ID AND f.CODE LIKE $4
-        ))
-        AND ($6 = '%%' OR TRIM(a.ARTCENTRALE) LIKE $6)
-        -- code centrale LaFoir'Fouille : préfixe 1000x sur 11 chiffres.
-        -- COALESCE car les articles non référencés valent '' ou NULL.
-        AND ($7 = '' OR (
-          $7 = '1' AND TRIM(COALESCE(a.ARTCENTRALE, '')) LIKE '1000%'
-                   AND LENGTH(TRIM(COALESCE(a.ARTCENTRALE, ''))) = 11
-        ) OR (
-          $7 = '0' AND NOT (
-            TRIM(COALESCE(a.ARTCENTRALE, '')) LIKE '1000%'
-            AND LENGTH(TRIM(COALESCE(a.ARTCENTRALE, ''))) = 11
-          )
-        ))
-      ORDER BY a.LIBELLE1
-      LIMIT ${limitNum} OFFSET ${offsetNum}
-    `, [`%${search}%`, `%${codein}%`, `%${ean}%`, `%${codefou}%`, actif,
-        `%${artcentrale}%`, has_artcentrale]);
+      ${where(conds)}
+      ORDER BY a.libelle1, a.no_id
+      LIMIT ${p.add(limit)} OFFSET ${p.add(offset)}
+    `, p.values);
 
-    const articles = result.rows.map(a => {
-      const photoCode = a.nomphoto ? a.nomphoto.replace(/\.[^.]+$/, '') : null;
-      return {
-        ...a,
-        photo_url: photoCode ? `/api/articles/${a.no_id}/photo` : null,
-        photo_url_large: photoCode ? `/api/articles/${a.no_id}/photo?size=large` : null,
-      };
-    });
-    res.json({ page: pageNum, limit: limitNum, articles });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
+  const articles = result.rows.map(a => ({ ...a, ...photoUrls(a.no_id, a.nomphoto) }));
+  res.json({ page, limit, articles });
 });
 
 // GET /api/articles/:id - Détail complet d'un article
 router.get('/:id', async (req, res) => {
-  try {
-    const pool = getPool();
+  const id = parseId(req.params.id);
+  const pool = getPool();
 
-    const article = await pool.query(`
+  const [article, gtins, stock, prix, fournisseurs] = await Promise.all([
+    pool.query(`
       SELECT
-        a.*, ai.PRIX_VENTE_MINI, ai.PRIX_VENTE_MAXI,
-        ai.ECO_HT, ai.ECO_TTC, ai.ON_WEB, ai.INTERDIT_REMISE,
-        ai.NOMPHOTO, ai.DATEDEBVENTE, ai.DATEFINVENTE,
-        ai.DATEVALIDITEACHAT, ai.COMMENTAIRE, ai.PV_CONSEILLE,
-        ai.FRAISLOGISTIC, ai.TRANSIT, ai.DISTRIBUTION,
-        pa.PA
-      FROM ARTICLES a
-      LEFT JOIN ARTICLE_INFOSUP ai ON ai.ARTNOID = a.NO_ID
-      LEFT JOIN Cube_PA pa ON pa.ArtNoId = a.NO_ID
-      WHERE a.NO_ID = $1
-    `, [req.params.id]);
+        a.*, ai.prix_vente_mini, ai.prix_vente_maxi,
+        ai.eco_ht, ai.eco_ttc, ai.on_web, ai.interdit_remise,
+        ai.nomphoto, ai.datedebvente, ai.datefinvente,
+        ai.datevaliditeachat, ai.commentaire, ai.pv_conseille,
+        ai.fraislogistic, ai.transit, ai.distribution,
+        pa.pa
+      FROM articles a
+      LEFT JOIN article_infosup ai ON ai.artnoid = a.no_id
+      LEFT JOIN cube_pa pa ON pa.artnoid = a.no_id
+      WHERE a.no_id = $1
+    `, [id]),
+    pool.query(
+      'SELECT gtin, preferentiel FROM art_gtin WHERE idarticle = $1 ORDER BY preferentiel DESC',
+      [id]
+    ),
+    pool.query(`
+      SELECT site, qte, prmp, valstock, pv, stockdispo,
+             dernierevente, dernierereception, stockmort
+      FROM cube_stock WHERE artnoid = $1 ORDER BY site
+    `, [id]),
+    pool.query('SELECT site, pv FROM cube_pv WHERE artnoid = $1 ORDER BY site', [id]),
+    pool.query(`
+      SELECT f.code AS codefou, fa.raisonsociale AS nom_fou,
+             f.reference, f.ean13, f.itf,
+             f.qteua, f.pcb, f.spcb, f.delai, f.securite, f.preference, f.suspendu,
+             t.prixachat, t.remise_promotion
+      FROM artfou1 f
+      LEFT JOIN fouadr1 fa ON TRIM(fa.code) = TRIM(f.code) AND fa.sit_code = '000'
+      LEFT JOIN artfou2 t ON t.idartfou1 = f.no_id
+      WHERE f.art_no_id = $1
+      ORDER BY f.preference
+    `, [id]),
+  ]);
 
-    if (!article.rows.length)
-      return res.status(404).json({ error: 'Article introuvable' });
+  if (!article.rows.length) throw new HttpError(404, 'Article introuvable');
 
-    const gtins = await pool.query(
-      `SELECT GTIN, PREFERENTIEL FROM ART_GTIN WHERE IDARTICLE = $1 ORDER BY PREFERENTIEL DESC`,
-      [req.params.id]
-    );
-
-    const stock = await pool.query(`
-      SELECT Site, QTE, Prmp, ValStock, PV, StockDispo,
-             DerniereVente, DerniereReception, StockMort
-      FROM Cube_Stock WHERE ArtNoId = $1 ORDER BY Site
-    `, [req.params.id]);
-
-    const prix = await pool.query(
-      `SELECT Site, PV FROM Cube_PV WHERE ArtNoId = $1 ORDER BY Site`,
-      [req.params.id]
-    );
-
-    const fournisseurs = await pool.query(`
-      SELECT f.CODE AS CODEFOU, fa.RAISONSOCIALE AS NOM_FOU,
-             f.REFERENCE, f.EAN13, f.ITF,
-             f.QTEUA, f.PCB, f.SPCB, f.DELAI, f.SECURITE, f.PREFERENCE, f.SUSPENDU,
-             t.PRIXACHAT, t.REMISE_PROMOTION
-      FROM ARTFOU1 f
-      LEFT JOIN FOUADR1 fa ON fa.CODE = f.CODE AND fa.SIT_CODE = '000'
-      LEFT JOIN ARTFOU2 t ON t.IDARTFOU1 = f.NO_ID
-      WHERE f.ART_NO_ID = $1
-      ORDER BY f.PREFERENCE
-    `, [req.params.id]);
-
-    const art = article.rows[0];
-    const photoCode = art.nomphoto ? art.nomphoto.replace(/\.[^.]+$/, '') : null;
-    res.json({
-      article: {
-        ...art,
-        artcentrale: art.artcentrale?.trim() || null,
-        photo_url: photoCode ? `/api/articles/${req.params.id}/photo` : null,
-        photo_url_large: photoCode ? `/api/articles/${req.params.id}/photo?size=large` : null,
-      },
-      gtins: gtins.rows,
-      stock: stock.rows,
-      prix: prix.rows,
-      fournisseurs: fournisseurs.rows,
-    });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
+  const art = article.rows[0];
+  res.json({
+    article: {
+      ...art,
+      artcentrale: art.artcentrale?.trim() || null,
+      ...photoUrls(id, art.nomphoto),
+    },
+    gtins: gtins.rows,
+    stock: stock.rows,
+    prix: prix.rows,
+    fournisseurs: fournisseurs.rows,
+  });
 });
+
+// Notes article (table note_articles alimentée par la sync).
+// Tolère l'absence de la table pendant le déploiement (42P01 = undefined_table).
+async function fetchNotes(pool, id) {
+  try {
+    const r = await pool.query(`
+      SELECT site, colisage, datederentree, qtederentree, totqte, nbjour, note
+      FROM note_articles WHERE artnoid = $1 ORDER BY site
+    `, [id]);
+    return r.rows;
+  } catch (err) {
+    if (err.code === '42P01') {
+      console.warn('[articles] table note_articles absente — notes vides');
+      return [];
+    }
+    throw err;
+  }
+}
 
 // GET /api/articles/:id/referentiel - Fiche complète
 router.get('/:id/referentiel', async (req, res) => {
-  try {
-    const pool = getPool();
-    const id = req.params.id;
+  const id = parseId(req.params.id);
+  const pool = getPool();
 
-    const article = await pool.query(`
-      SELECT
-        a.NO_ID, a.CODEIN, a.LIBELLE1, a.LIBELLE2, a.LIB_TICKET,
-        a.TAX_CODE, a.ACTIF, a.SUSPENDU, a.UTILISABLE,
-        a.SUIVIDATECREATION, a.SUIVIDATEMODIF,
-        ai.PRIX_VENTE_MINI, ai.PRIX_VENTE_MAXI,
-        ai.ECO_HT, ai.ECO_TTC, ai.ON_WEB,
-        ai.INTERDIT_REMISE, ai.NOMPHOTO,
-        ai.DATEDEBVENTE, ai.DATEFINVENTE,
-        ai.PV_CONSEILLE, ai.FRAISLOGISTIC,
-        ai.COMMENTAIRE,
-        n.CODE AS NOM_CODE, n.LIBELLE AS NOM_LIBELLE, n.NIVEAU AS NOM_NIVEAU,
-        n.CHEMIN_PERE AS NOM_CHEMIN_PERE
-      FROM ARTICLES a
-      LEFT JOIN ARTICLE_INFOSUP ai ON ai.ARTNOID = a.NO_ID
-      LEFT JOIN NOMENCLATURE n ON n.NO_ID = a.NOM_NO_ID
-      WHERE a.NO_ID = $1
-    `, [id]);
-
-    if (!article.rows.length)
-      return res.status(404).json({ error: 'Article introuvable' });
-
-    const gtins = await pool.query(
-      `SELECT GTIN, PREFERENTIEL FROM ART_GTIN WHERE IDARTICLE = $1 ORDER BY PREFERENTIEL DESC`,
-      [id]
-    );
-
-    const gammes = await pool.query(`
-      SELECT g.CODE AS GAMME_CODE, g.LIBELLE AS GAMME_LIBELLE,
-             s.CODE AS SAISON_CODE, s.LIBELLE AS SAISON_LIBELLE,
-             ags.IDGAMME, ags.IDSAISON
-      FROM ART_GAMME_SAISON ags
-      JOIN GAMMES g ON g.NO_ID = ags.IDGAMME
-      LEFT JOIN SAISONS s ON s.NO_ID = ags.IDSAISON
-      WHERE ags.ARTNOID = $1
-    `, [id]);
-
-    const stock = await pool.query(`
-      SELECT Site, QTE, Prmp, ValStock, PV, StockDispo,
-             DerniereVente, DerniereReception, StockMort
-      FROM Cube_Stock WHERE ArtNoId = $1 ORDER BY Site
-    `, [id]);
-
-    const prixAchat = await pool.query(
-      `SELECT ArtNoId, PA FROM Cube_PA WHERE ArtNoId = $1`,
-      [id]
-    );
-
-    const prixVente = await pool.query(
-      `SELECT Site, PV FROM Cube_PV WHERE ArtNoId = $1 ORDER BY Site`,
-      [id]
-    );
-
-    const fournisseurs = await pool.query(`
-      SELECT f.CODE AS CODEFOU, fi.nom AS NOM_FOU,
-             f.REFERENCE AS REF_FOU, f.EAN13, f.ITF,
-             f.QTEUA AS PCB, f.SPCB, f.DELAI, f.SECURITE,
-             f.PREFERENCE, f.SUSPENDU,
-             t.PRIXACHAT, t.REMISE_PROMOTION
-      FROM ARTFOU1 f
-      LEFT JOIN fouident fi ON fi.code = TRIM(f.CODE)
-      LEFT JOIN ARTFOU2 t ON t.IDARTFOU1 = f.NO_ID
-      WHERE f.ART_NO_ID = $1
-      ORDER BY f.PREFERENCE
-    `, [id]);
-
-    const mvtAgreges = await pool.query(`
-      SELECT
-        MAX(CASE WHEN GenreMvt = 1 THEN DatMvt END) AS DERNIERE_ENTREE,
-        MAX(CASE WHEN GenreMvt = 3 THEN DatMvt END) AS DERNIERE_VENTE,
-        SUM(CASE WHEN GenreMvt = 3 THEN QteMvt ELSE 0 END) AS QTE_TOTALE_VENDUE,
-        SUM(CASE WHEN GenreMvt = 3 THEN MntMvtTTC ELSE 0 END) AS CA_TTC_TOTAL,
-        SUM(CASE WHEN GenreMvt = 3 THEN MargeMvt ELSE 0 END) AS MARGE_TOTALE
-      FROM MvtArt WHERE ArtNoId = $1
-    `, [id]);
-
-    let stockRemballe = [];
-    try {
-      const remb = await pool.query(
-        `SELECT Site, QTE AS QTE_REMBALLE, DateSaisie FROM InvRemballe WHERE ArtNoId = $1 ORDER BY Site`,
+  // Requêtes indépendantes exécutées en parallèle
+  const [article, gtins, gammes, stock, prixAchat, prixVente, fournisseurs, mvtAgreges, notes, ranking] =
+    await Promise.all([
+      pool.query(`
+        SELECT
+          a.no_id, a.codein, a.libelle1, a.libelle2, a.lib_ticket,
+          a.tax_code, a.actif, a.suspendu, a.utilisable,
+          a.suividatecreation, a.suividatemodif,
+          ai.prix_vente_mini, ai.prix_vente_maxi,
+          ai.eco_ht, ai.eco_ttc, ai.on_web,
+          ai.interdit_remise, ai.nomphoto,
+          ai.datedebvente, ai.datefinvente,
+          ai.pv_conseille, ai.fraislogistic,
+          ai.commentaire,
+          n.code AS nom_code, n.libelle AS nom_libelle, n.niveau AS nom_niveau,
+          n.chemin_pere AS nom_chemin_pere
+        FROM articles a
+        LEFT JOIN article_infosup ai ON ai.artnoid = a.no_id
+        LEFT JOIN nomenclature n ON n.no_id = a.nom_no_id
+        WHERE a.no_id = $1
+      `, [id]),
+      pool.query(
+        'SELECT gtin, preferentiel FROM art_gtin WHERE idarticle = $1 ORDER BY preferentiel DESC',
         [id]
-      );
-      stockRemballe = remb.rows;
-    } catch (e) { /* Table optionnelle */ }
-
-    let notes = [];
-    try {
-      const notesRes = await pool.query(
-        `SELECT Note, DateSaisie, Auteur FROM NoteArticles WHERE ArtNoId = $1 ORDER BY DateSaisie DESC`,
-        [id]
-      );
-      notes = notesRes.rows;
-    } catch (e) { /* Table optionnelle */ }
-
-    let ranking = [];
-    try {
-      const rankRes = await pool.query(`
+      ),
+      pool.query(`
+        SELECT g.code AS gamme_code, g.libelle AS gamme_libelle,
+               s.code AS saison_code, s.libelle AS saison_libelle,
+               ags.idgamme, ags.idsaison
+        FROM art_gamme_saison ags
+        JOIN gammes g ON g.no_id = ags.idgamme
+        LEFT JOIN saisons s ON s.no_id = ags.idsaison
+        WHERE ags.artnoid = $1
+      `, [id]),
+      pool.query(`
+        SELECT site, qte, prmp, valstock, pv, stockdispo,
+               dernierevente, dernierereception, stockmort
+        FROM cube_stock WHERE artnoid = $1 ORDER BY site
+      `, [id]),
+      pool.query('SELECT artnoid, pa FROM cube_pa WHERE artnoid = $1', [id]),
+      pool.query('SELECT site, pv FROM cube_pv WHERE artnoid = $1 ORDER BY site', [id]),
+      pool.query(`
+        SELECT f.code AS codefou, fi.nom AS nom_fou,
+               f.reference AS ref_fou, f.ean13, f.itf,
+               f.qteua AS pcb, f.spcb, f.delai, f.securite,
+               f.preference, f.suspendu,
+               t.prixachat, t.remise_promotion
+        FROM artfou1 f
+        LEFT JOIN fouident fi ON TRIM(fi.code) = TRIM(f.code)
+        LEFT JOIN artfou2 t ON t.idartfou1 = f.no_id
+        WHERE f.art_no_id = $1
+        ORDER BY f.preference
+      `, [id]),
+      pool.query(`
+        SELECT
+          MAX(CASE WHEN genremvt = 1 THEN datmvt END) AS derniere_entree,
+          MAX(CASE WHEN genremvt = 3 THEN datmvt END) AS derniere_vente,
+          SUM(CASE WHEN genremvt = 3 THEN qtemvt ELSE 0 END) AS qte_totale_vendue,
+          SUM(CASE WHEN genremvt = 3 THEN mntmvtttc ELSE 0 END) AS ca_ttc_total,
+          SUM(CASE WHEN genremvt = 3 THEN margemvt ELSE 0 END) AS marge_totale
+        FROM mvtart WHERE artnoid = $1
+      `, [id]),
+      fetchNotes(pool, id),
+      pool.query(`
         SELECT r.gencod, r.site, r.ranking_ca, r.ranking_qte,
                r.ranking_mag_ca, r.ranking_mag_qte, r.ranking_mag_marge,
                r.foucentrale, r.nomfoucentrale,
@@ -264,267 +242,201 @@ router.get('/:id/referentiel', async (req, res) => {
         JOIN art_gtin g ON g.gtin = r.gencod
         WHERE g.idarticle = $1
         ORDER BY r.site
-      `, [id]);
-      ranking = rankRes.rows;
-    } catch (e) { /* Table optionnelle */ }
+      `, [id]),
+    ]);
 
-    const artRef = article.rows[0];
-    const photoCodeRef = artRef.nomphoto ? artRef.nomphoto.replace(/\.[^.]+$/, '') : null;
-    res.json({
-      article: {
-        ...artRef,
-        photo_url: photoCodeRef ? `/api/articles/${id}/photo` : null,
-        photo_url_large: photoCodeRef ? `/api/articles/${id}/photo?size=large` : null,
-      },
-      gtins: gtins.rows,
-      gammes: gammes.rows,
-      ranking,
-      stock: stock.rows,
-      stock_remballe: stockRemballe,
-      prix: {
-        achat: prixAchat.rows[0]?.pa ?? null,
-        vente_par_site: prixVente.rows,
-      },
-      fournisseurs: fournisseurs.rows,
-      performance: mvtAgreges.rows[0],
-      notes,
-    });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
+  if (!article.rows.length) throw new HttpError(404, 'Article introuvable');
+
+  const artRef = article.rows[0];
+  res.json({
+    article: { ...artRef, ...photoUrls(id, artRef.nomphoto) },
+    gtins: gtins.rows,
+    gammes: gammes.rows,
+    ranking: ranking.rows,
+    stock: stock.rows,
+    // Pas de données de remballe dans PostgreSQL : champ conservé pour compatibilité
+    stock_remballe: null,
+    prix: {
+      achat: prixAchat.rows[0]?.pa ?? null,
+      vente_par_site: prixVente.rows,
+    },
+    fournisseurs: fournisseurs.rows,
+    performance: mvtAgreges.rows[0],
+    notes,
+  });
 });
 
-// Cache mémoire : nomphoto_code -> { imageUrl, expires }
-const photoCache = new Map();
-
-const FF_UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36';
-
-async function resolvePhotoUrl(pool, code, size) {
-  const cacheKey = `${code}:${size}`;
-  const cached = photoCache.get(cacheKey);
-  if (cached && cached.expires > Date.now()) return cached.imageUrl;
-
-  // 1. Cherche l'URL produit dans l'index sitemap
-  const indexRow = await pool.query(
-    `SELECT product_url FROM ff_photo_index WHERE photo_code = $1`,
-    [code]
-  );
-  if (!indexRow.rows.length) return null;
-
-  const productPageUrl = indexRow.rows[0].product_url;
-
-  // 2. Fetch page produit pour URL signée
-  const productRes = await fetch(productPageUrl, {
-    headers: { 'User-Agent': FF_UA, 'Accept-Language': 'fr-FR,fr;q=0.9' },
-  });
-  if (!productRes.ok) return null;
-  const productHtml = await productRes.text();
-
-  // Extrait URL CDN signée (pattern: medias/{code}-0-{size}?context=...)
-  const imgPattern = new RegExp(
-    `https://prod-api\\.lafoirfouille\\.fr/medias/${code}-0-${size}\\?context=[A-Za-z0-9+/=_%-]+`
-  );
-  const imgMatch = productHtml.match(imgPattern);
-  if (!imgMatch) return null;
-
-  const imageUrl = imgMatch[0].replace(/&amp;/g, '&');
-  photoCache.set(cacheKey, { imageUrl, expires: Date.now() + 3600_000 });
-  return imageUrl;
-}
-
-// GET /api/articles/:id/photo?size=large — proxy photo depuis lafoirfouille.fr
+// GET /api/articles/:id/photo?size=large — proxy photo depuis lafoirfouille.fr (route publique)
 router.get('/:id/photo', async (req, res) => {
-  try {
-    const pool = getPool();
-    const size = req.query.size === 'large' ? '1200Wx1200H' : '300Wx300H';
+  const id = parseId(req.params.id);
+  const size = req.query.size === 'large' ? PHOTO_SIZES.large : PHOTO_SIZES.small;
+  const pool = getPool();
 
-    const result = await pool.query(
-      `SELECT ai.NOMPHOTO FROM ARTICLES a
-       LEFT JOIN ARTICLE_INFOSUP ai ON ai.ARTNOID = a.NO_ID
-       WHERE a.NO_ID = $1`,
-      [req.params.id]
-    );
+  const result = await pool.query(`
+      SELECT ai.nomphoto FROM articles a
+      LEFT JOIN article_infosup ai ON ai.artnoid = a.no_id
+      WHERE a.no_id = $1
+    `, [id]);
 
-    if (!result.rows.length) return res.status(404).json({ error: 'Article introuvable' });
+  if (!result.rows.length) throw new HttpError(404, 'Article introuvable');
 
-    const nomphoto = result.rows[0].nomphoto;
-    if (!nomphoto) return res.status(404).json({ error: 'Pas de photo pour cet article' });
+  const code = photoCode(result.rows[0].nomphoto);
+  if (!code) throw new HttpError(404, 'Pas de photo pour cet article');
+  if (!/^\d{9,13}$/.test(code)) throw new HttpError(404, 'Format photo non supporté');
 
-    const code = nomphoto.replace(/\.[^.]+$/, '');
-    if (!/^\d{9,13}$/.test(code)) return res.status(404).json({ error: 'Format photo non supporté', nomphoto });
-    const imageUrl = await resolvePhotoUrl(pool, code, size);
+  const imageUrl = await resolvePhotoUrl(pool, code, size);
+  if (!imageUrl) throw new HttpError(404, 'Photo non trouvée sur lafoirfouille.fr');
 
-    if (!imageUrl) return res.status(404).json({ error: 'Photo non trouvée sur lafoirfouille.fr', code });
-
-    // Proxy l'image (évite les problèmes CORS côté client)
-    const imgRes = await fetch(imageUrl, {
-      headers: { 'Referer': 'https://www.lafoirfouille.fr/', 'User-Agent': FF_UA },
-    });
-
-    res.setHeader('Content-Type', imgRes.headers.get('content-type') || 'image/jpeg');
-    res.setHeader('Cache-Control', 'public, max-age=3600');
-    const { Readable } = require('stream');
-    Readable.fromWeb(imgRes.body).pipe(res);
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
+  // Proxy de l'image (évite les problèmes CORS côté client)
+  await proxyImage(res, imageUrl);
 });
 
 // GET /api/articles/:id/dernier-fournisseur?site=
-// Retourne le fournisseur réel (dernière entrée en stock GenreMvt=1) par site
-// C'est le seul moyen fiable d'identifier qui a livré le produit actuellement en rayon
+// Fournisseur réel (dernière entrée en stock GenreMvt=1) par site.
+// C'est le seul moyen fiable d'identifier qui a livré le produit actuellement en rayon.
 router.get('/:id/dernier-fournisseur', async (req, res) => {
-  try {
-    const pool = getPool();
-    const { site = '' } = req.query;
+  const id = parseId(req.params.id);
+  const site = parseText(req.query.site, 'site', { max: 20 });
 
-    const result = await pool.query(`
-      SELECT DISTINCT ON (m.Site)
-        m.Site,
-        m.DatMvt       AS date_derniere_entree,
-        m.CODEFOU      AS codefou,
+  const p = new SqlParams([id]);
+  const result = await getPool().query(`
+      SELECT DISTINCT ON (m.site)
+        m.site,
+        m.datmvt       AS date_derniere_entree,
+        m.codefou      AS codefou,
         fi.nom         AS nom_fournisseur,
-        m.QteMvt       AS qte_entree,
-        m.Prmp         AS prmp
-      FROM MvtArt m
-      LEFT JOIN fouident fi ON fi.code = TRIM(m.CODEFOU)
-      WHERE m.ArtNoId = $1
-        AND m.GenreMvt = 1
-        AND TRIM(m.CODEFOU) != ''
-        AND m.CODEFOU IS NOT NULL
-        AND ($2 = '' OR m.Site LIKE $2)
-      ORDER BY m.Site, m.DatMvt DESC
-    `, [req.params.id, `%${site}%`]);
+        m.qtemvt       AS qte_entree,
+        m.prmp         AS prmp
+      FROM mvtart m
+      LEFT JOIN fouident fi ON TRIM(fi.code) = TRIM(m.codefou)
+      WHERE m.artnoid = $1
+        AND m.genremvt = 1
+        AND m.codefou IS NOT NULL
+        AND TRIM(m.codefou) != ''
+        ${site ? `AND m.site LIKE ${p.add(likeContains(site))}` : ''}
+      ORDER BY m.site, m.datmvt DESC
+    `, p.values);
 
-    res.json({ artnoid: req.params.id, fournisseurs_par_site: result.rows });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
+  res.json({ artnoid: id, fournisseurs_par_site: result.rows });
 });
 
 // GET /api/articles/:id/mouvements?dateDebut=&dateFin=&site=&page=&limit=
 router.get('/:id/mouvements', async (req, res) => {
-  try {
-    const pool = getPool();
-    const { dateDebut = '', dateFin = '', site = '', page = 1, limit = 100 } = req.query;
-    const pageNum  = Math.max(1, parseInt(page)   || 1);
-    const limitNum = Math.max(1, Math.min(parseInt(limit) || 100, 1000));
-    const offsetNum = (pageNum - 1) * limitNum;
+  const id = parseId(req.params.id);
+  const site = parseText(req.query.site, 'site', { max: 20 });
+  const { debut, fin } = parseDateRange(req.query, { defDebut: '2000-01-01', defFin: '2099-12-31' });
+  const { page, limit, offset } = parsePagination(req.query, { defLimit: 100, maxLimit: 1000 });
 
-    const result = await pool.query(`
-      SELECT DatMvt, Site, LibMvt, GenreMvt, QteMvt, ValMvt,
-             MntMvtHt, MntMvtTTC, MargeMvt, QteStock, Prmp, CODEFOU
-      FROM MvtArt
-      WHERE ArtNoId = $1
-        AND DatMvt BETWEEN $2 AND $3
-        AND Site LIKE $4
-      ORDER BY DatMvt DESC
-      LIMIT ${limitNum} OFFSET ${offsetNum}
-    `, [req.params.id, dateDebut || '2000-01-01', dateFin || '2099-12-31', `%${site}%`]);
+  const p = new SqlParams([id]);
+  const conds = ['artnoid = $1', dateRange('datmvt', p, debut, fin)];
+  // Filtre partiel sur le site (documenté), appliqué seulement s'il est fourni
+  if (site) conds.push(`site LIKE ${p.add(likeContains(site))}`);
 
-    res.json({ page: pageNum, limit: limitNum, mouvements: result.rows });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
+  const result = await getPool().query(`
+      SELECT datmvt, site, libmvt, genremvt, qtemvt, valmvt,
+             mntmvtht, mntmvtttc, margemvt, qtestock, prmp, codefou
+      FROM mvtart
+      ${where(conds)}
+      ORDER BY datmvt DESC
+      LIMIT ${p.add(limit)} OFFSET ${p.add(offset)}
+    `, p.values);
+
+  res.json({ page, limit, mouvements: result.rows });
 });
 
 // GET /api/articles/:id/mensuel?dateDebut=&dateFin=&site=
 // Ventes + stock fin de mois, mois par mois, par site
 router.get('/:id/mensuel', async (req, res) => {
-  try {
-    const pool = getPool();
-    const { dateDebut = '2024-01-01', dateFin = '2099-12-31', site = '' } = req.query;
+  const id = parseId(req.params.id);
+  const site = parseText(req.query.site, 'site', { max: 20 });
+  const { debut, fin } = parseDateRange(req.query, { defDebut: '2024-01-01', defFin: '2099-12-31' });
 
+  // Construit les conditions communes (mêmes paramètres pour les 3 requêtes)
+  const p = new SqlParams([id]);
+  const conds = ['artnoid = $1', dateRange('datmvt', p, debut, fin)];
+  if (site) conds.push(`site = ${p.add(site)}`);
+  const baseWhere = conds.join(' AND ');
+  const pool = getPool();
+
+  const [ventes, receptions, stocks] = await Promise.all([
     // Ventes par mois et par site
-    const ventes = await pool.query(`
+    pool.query(`
       SELECT
-        TO_CHAR(DatMvt, 'YYYY-MM') AS mois,
-        Site,
-        COUNT(*)           AS nb_passages,
-        SUM(QteMvt)        AS qte_vendue,
-        SUM(MntMvtHt)      AS ca_ht,
-        SUM(MntMvtTTC)     AS ca_ttc,
-        SUM(MargeMvt)      AS marge,
-        CASE WHEN SUM(MntMvtHt) != 0
-          THEN ROUND(SUM(MargeMvt) / ABS(SUM(MntMvtHt)) * 100, 2)
-          ELSE 0 END       AS taux_marge
-      FROM MvtArt
-      WHERE ArtNoId = $1
-        AND GenreMvt = 3
-        AND DatMvt BETWEEN $2 AND $3
-        AND Site LIKE $4
-      GROUP BY TO_CHAR(DatMvt, 'YYYY-MM'), Site
-      ORDER BY mois DESC, Site
-    `, [req.params.id, dateDebut, dateFin, `%${site}%`]);
-
-    // Réceptions par mois et par site
-    const receptions = await pool.query(`
-      SELECT
-        TO_CHAR(DatMvt, 'YYYY-MM') AS mois,
-        Site,
-        COUNT(*)           AS nb_receptions,
-        SUM(QteMvt)        AS qte_recue
-      FROM MvtArt
-      WHERE ArtNoId = $1
-        AND GenreMvt = 1
-        AND DatMvt BETWEEN $2 AND $3
-        AND Site LIKE $4
-      GROUP BY TO_CHAR(DatMvt, 'YYYY-MM'), Site
-      ORDER BY mois DESC, Site
-    `, [req.params.id, dateDebut, dateFin, `%${site}%`]);
-
-    // Stock fin de mois : dernier QteStock de chaque mois par site
-    const stocks = await pool.query(`
-      SELECT DISTINCT ON (TO_CHAR(DatMvt, 'YYYY-MM'), Site)
-        TO_CHAR(DatMvt, 'YYYY-MM') AS mois,
-        Site,
-        QteStock AS stock_fin_mois,
-        Prmp     AS prmp_fin_mois
-      FROM MvtArt
-      WHERE ArtNoId = $1
-        AND DatMvt BETWEEN $2 AND $3
-        AND Site LIKE $4
-      ORDER BY TO_CHAR(DatMvt, 'YYYY-MM'), Site, DatMvt DESC
-    `, [req.params.id, dateDebut, dateFin, `%${site}%`]);
-
-    // Assembler par mois+site
-    const key = (mois, site) => `${mois}|${site}`;
-    const byKey = (rows) => Object.fromEntries(rows.map(r => [key(r.mois, r.site), r]));
-
-    const sv = byKey(ventes.rows);
-    const sr = byKey(receptions.rows);
-    const ss = byKey(stocks.rows);
-
-    const keys = [...new Set([
-      ...Object.keys(sv), ...Object.keys(sr), ...Object.keys(ss),
-    ])].sort().reverse();
-
-    const data = keys.map(k => {
-      const [mois, site] = k.split('|');
-      return {
-        mois,
+        TO_CHAR(datmvt, 'YYYY-MM') AS mois,
         site,
-        stock_fin_mois: ss[k]?.stock_fin_mois ?? null,
-        prmp_fin_mois:  ss[k]?.prmp_fin_mois  ?? null,
-        ventes:         sv[k] ? {
-          nb_passages: sv[k].nb_passages,
-          qte_vendue:  sv[k].qte_vendue,
-          ca_ht:       sv[k].ca_ht,
-          ca_ttc:      sv[k].ca_ttc,
-          marge:       sv[k].marge,
-          taux_marge:  sv[k].taux_marge,
-        } : null,
-        receptions: sr[k] ? {
-          nb_receptions: sr[k].nb_receptions,
-          qte_recue:     sr[k].qte_recue,
-        } : null,
-      };
-    });
+        COUNT(*)           AS nb_passages,
+        SUM(qtemvt)        AS qte_vendue,
+        SUM(mntmvtht)      AS ca_ht,
+        SUM(mntmvtttc)     AS ca_ttc,
+        SUM(margemvt)      AS marge,
+        CASE WHEN SUM(mntmvtht) != 0
+          THEN ROUND(SUM(margemvt) / ABS(SUM(mntmvtht)) * 100, 2)
+          ELSE 0 END       AS taux_marge
+      FROM mvtart
+      WHERE ${baseWhere} AND genremvt = 3
+      GROUP BY TO_CHAR(datmvt, 'YYYY-MM'), site
+      ORDER BY mois DESC, site
+    `, p.values),
+    // Réceptions par mois et par site
+    pool.query(`
+      SELECT
+        TO_CHAR(datmvt, 'YYYY-MM') AS mois,
+        site,
+        COUNT(*)           AS nb_receptions,
+        SUM(qtemvt)        AS qte_recue
+      FROM mvtart
+      WHERE ${baseWhere} AND genremvt = 1
+      GROUP BY TO_CHAR(datmvt, 'YYYY-MM'), site
+      ORDER BY mois DESC, site
+    `, p.values),
+    // Stock fin de mois : dernier qtestock de chaque mois par site
+    pool.query(`
+      SELECT DISTINCT ON (TO_CHAR(datmvt, 'YYYY-MM'), site)
+        TO_CHAR(datmvt, 'YYYY-MM') AS mois,
+        site,
+        qtestock AS stock_fin_mois,
+        prmp     AS prmp_fin_mois
+      FROM mvtart
+      WHERE ${baseWhere}
+      ORDER BY TO_CHAR(datmvt, 'YYYY-MM'), site, datmvt DESC
+    `, p.values),
+  ]);
 
-    res.json({ artNoId: req.params.id, dateDebut, dateFin, data });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
+  // Assemblage par mois + site
+  const key = (mois, s) => `${mois}|${s}`;
+  const byKey = (rows) => Object.fromEntries(rows.map(r => [key(r.mois, r.site), r]));
+
+  const sv = byKey(ventes.rows);
+  const sr = byKey(receptions.rows);
+  const ss = byKey(stocks.rows);
+
+  const keys = [...new Set([
+    ...Object.keys(sv), ...Object.keys(sr), ...Object.keys(ss),
+  ])].sort().reverse();
+
+  const data = keys.map(k => {
+    const [mois, s] = k.split('|');
+    return {
+      mois,
+      site: s,
+      stock_fin_mois: ss[k]?.stock_fin_mois ?? null,
+      prmp_fin_mois:  ss[k]?.prmp_fin_mois  ?? null,
+      ventes: sv[k] ? {
+        nb_passages: sv[k].nb_passages,
+        qte_vendue:  sv[k].qte_vendue,
+        ca_ht:       sv[k].ca_ht,
+        ca_ttc:      sv[k].ca_ttc,
+        marge:       sv[k].marge,
+        taux_marge:  sv[k].taux_marge,
+      } : null,
+      receptions: sr[k] ? {
+        nb_receptions: sr[k].nb_receptions,
+        qte_recue:     sr[k].qte_recue,
+      } : null,
+    };
+  });
+
+  res.json({ artNoId: id, dateDebut: debut, dateFin: fin, data });
 });
 
 module.exports = router;

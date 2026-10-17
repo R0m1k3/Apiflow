@@ -76,7 +76,7 @@ async function syncReferentiel(force) {
       idgamme:  r.IDGAMME,
       idsaison: r.IDSAISON,
     }));
-    const count = await fullRefresh(pg, 'art_gamme_saison', rows, AGS_COLS);
+    const count = await fullRefresh(pg, 'art_gamme_saison', rows, AGS_COLS, { force });
     await logSync(pg, 'art_gamme_saison', count, 'ok');
     console.log(`[art_gamme_saison] ${count} lignes refresh`);
   } catch (err) {

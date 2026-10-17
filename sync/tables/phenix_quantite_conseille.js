@@ -43,7 +43,10 @@ async function syncPhenixQuantiteConseille(force) {
       montant:            r.Montant,
     }));
 
-    const count = await fullRefresh(pg, 'phenix_quantite_conseille', rows, COLS);
+    // La source contient des doublons d'ident (journal recalculé) : on garde la dernière occurrence
+    const unique = [...new Map(rows.filter(r => r.ident != null).map(r => [String(r.ident), r])).values()];
+    if (unique.length < rows.length) console.log(`[phenix_quantite_conseille] ${rows.length - unique.length} doublon(s) d'ident ignoré(s)`);
+    const count = await fullRefresh(pg, 'phenix_quantite_conseille', unique, COLS, { force });
     await logSync(pg, 'phenix_quantite_conseille', count, 'ok');
     console.log(`[phenix_quantite_conseille] ${count} lignes`);
   } catch (err) {

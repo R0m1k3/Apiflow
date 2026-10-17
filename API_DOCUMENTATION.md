@@ -2,8 +2,48 @@
 
 **Base URL** : `https://api.ffnancy.fr`
 **Format** : JSON
-**Méthode** : GET uniquement (API lecture seule)
+**Méthode** : GET (lecture seule), sauf `POST /api/photos/reindex`
 **Données** : Synchronisées depuis SQL Server chaque nuit à 6h45 (heure Paris)
+
+---
+
+## Authentification
+
+Toutes les routes exigent une **clé d'API**, sauf :
+- `GET /api/health`
+- `GET /api/articles/:id/photo` (utilisée directement dans des balises `<img>`)
+
+La clé se passe dans l'un de ces en-têtes :
+
+```
+X-API-Key: <clé>
+Authorization: Bearer <clé>
+```
+
+```javascript
+const res = await fetch('https://api.ffnancy.fr/api/articles?search=bougie', {
+  headers: { 'X-API-Key': API_KEY },
+});
+```
+
+Clé absente ou invalide → `401` :
+```json
+{ "error": "Clé d'API requise (en-tête X-API-Key)" }
+```
+
+> Ne jamais passer la clé dans l'URL (query string) : elle finirait dans les journaux et l'historique.
+> Si le serveur n'a aucune clé configurée (`API_KEYS` vide), l'accès est libre et `/api/health` renvoie `"auth": "disabled"`.
+
+### Limitation de débit
+`RATE_LIMIT_PER_MIN` requêtes par minute et par adresse IP (600 par défaut). Au-delà → `429` avec l'en-tête `Retry-After` (secondes).
+Les en-têtes `X-RateLimit-Limit` / `X-RateLimit-Remaining` indiquent le quota restant.
+
+### Cache
+Les réponses `GET` réussies portent `Cache-Control: private, max-age=300` (les données ne changent qu'une fois par nuit) et un `ETag`.
+Le serveur garde aussi un cache mémoire de 5 minutes (en-tête `X-Cache: HIT|MISS`). Ajouter `?nocache=1` pour forcer une lecture fraîche.
+
+### CORS
+Les appels navigateur cross-origin ne sont autorisés que pour les origines listées dans `CORS_ORIGINS` (côté serveur).
 
 ---
 
@@ -12,9 +52,15 @@
 ```
 GET /api/health
 ```
+Public, jamais mis en cache. HTTP `200` si la base répond, `503` sinon.
 ```json
-{ "status": "ok", "database": "foirfouille", "server": "postgres" }
+{ "status": "ok", "db": "ok", "auth": "enabled" }
 ```
+| Champ    | Valeurs                  |
+|----------|--------------------------|
+| `status` | `ok` / `error`           |
+| `db`     | `ok` / `error`           |
+| `auth`   | `enabled` / `disabled`   |
 
 ---
 
@@ -27,9 +73,9 @@ GET /api/articles
 
 | Paramètre | Type   | Description                          | Défaut |
 |-----------|--------|--------------------------------------|--------|
-| `search`  | string | Recherche dans libellé               | —      |
-| `codein`  | string | Code interne (partiel)               | —      |
-| `ean`     | string | EAN / GTIN                           | —      |
+| `search`  | string | Recherche dans libellé1/libellé2 (partiel, insensible à la casse) | — |
+| `codein`  | string | Code interne (partiel, insensible à la casse) | — |
+| `ean`     | string | EAN / GTIN (partiel) — cherche dans **tous** les GTIN de l'article | — |
 | `codefou` | string | Code fournisseur (partiel)           | —      |
 | `actif`   | `1`/`0`| `1` = actif, `0` = suspendu         | —      |
 | `artcentrale` | string | Code centrale (partiel)          | —      |
@@ -140,7 +186,7 @@ Retourne toutes les informations consolidées de l'article :
   "stock": [
     { "site": "001", "qte": 12, "prmp": 10.20, "valstock": 122.40, "pv": 18.50, "stockdispo": 10 }
   ],
-  "stock_remballe": [],
+  "stock_remballe": null,
   "prix": {
     "achat": 10.50,
     "vente_par_site": [ { "site": "001", "pv": 18.50 } ]
@@ -155,9 +201,17 @@ Retourne toutes les informations consolidées de l'article :
     "ca_ttc_total": 4588.00,
     "marge_totale": 1020.50
   },
-  "notes": []
+  "notes": [
+    {
+      "site": "001", "colisage": 6, "datederentree": "2026-09-02T00:00:00.000Z",
+      "qtederentree": 12, "totqte": 30, "nbjour": 10, "note": 4.5
+    }
+  ]
 }
 ```
+
+> `stock_remballe` vaut toujours `null` (aucune donnée de remballe dans la base ; champ conservé pour compatibilité).
+> `notes` provient de la table `note_articles` (une ligne par site).
 
 ---
 
@@ -176,7 +230,7 @@ Retourne en une seule requête, mois par mois et par site :
 |-------------|--------|----------------------------|------------|
 | `dateDebut` | date   | Date début `YYYY-MM-DD`    | 2024-01-01 |
 | `dateFin`   | date   | Date fin `YYYY-MM-DD`      | 2099-12-31 |
-| `site`      | string | Filtrer par site           | tous       |
+| `site`      | string | Code site exact            | tous       |
 
 **Réponse** :
 
@@ -313,23 +367,30 @@ Proxy et met en cache l'image du produit depuis `lafoirfouille.fr` en contournan
 
 **Réponse** : Le flux binaire de l'image avec un en-tête `Content-Type` approprié (ex: `image/jpeg`) et une directive de mise en cache HTTP.
 
+Route **publique** (pas de clé d'API). Erreurs : `404` (article, photo ou image introuvable), `502` (lafoirfouille.fr indisponible ou délai de 8 s dépassé).
+
 ---
 
 ## Fournisseurs
 
 ### Liste des fournisseurs
 ```
-GET /api/fournisseurs?search=
+GET /api/fournisseurs?search=&page=&limit=
 ```
 
-| Paramètre | Type   | Description               |
-|-----------|--------|---------------------------|
-| `search`  | string | Recherche sur code/nom    |
+| Paramètre | Type   | Description                                   | Défaut |
+|-----------|--------|-----------------------------------------------|--------|
+| `search`  | string | Recherche sur code/nom (partiel, sans casse)  | —      |
+| `page`    | int    | Numéro de page                                | 1      |
+| `limit`   | int    | Lignes par page (max 5000)                    | 500    |
 
-**Réponse** :
+**Réponse** (`count` = lignes de la page, `total` = nombre total de fournisseurs) :
 ```json
 {
   "count": 142,
+  "total": 142,
+  "page": 1,
+  "limit": 500,
   "fournisseurs": [
     {
       "codefou": "FOU01",
@@ -416,7 +477,7 @@ GET /api/stock?site=&page=&limit=
 
 | Paramètre | Type   | Description              | Défaut |
 |-----------|--------|--------------------------|--------|
-| `site`    | string | Filtrer par site         | tous   |
+| `site`    | string | Code site exact          | tous   |
 | `page`    | int    | Numéro de page           | 1      |
 | `limit`   | int    | Max 1000                 | 100    |
 
@@ -430,7 +491,7 @@ GET /api/stock/article/:id
 **Réponse** :
 ```json
 {
-  "artnoid": 12345,
+  "artNoId": "12345",
   "stock": [
     {
       "site": "001",
@@ -444,6 +505,7 @@ GET /api/stock/article/:id
       "dernierevente": "2024-06-15T00:00:00.000Z",
       "dernierereception": "2024-05-10T00:00:00.000Z",
       "nbjoursdernierevente": 5,
+      "nbjoursdernierereception": 38,
       "interditachat": null,
       "codefou": "FOU01"
     }
@@ -588,7 +650,7 @@ GET /api/commandes
 |-------------|--------|--------------------------|------------|
 | `dateDebut` | date   | Date début `YYYY-MM-DD`  | 2020-01-01 |
 | `dateFin`   | date   | Date fin `YYYY-MM-DD`    | 2099-12-31 |
-| `codefou`   | string | Filtrer par fournisseur  | —          |
+| `codefou`   | string | Filtrer par fournisseur (partiel) | — |
 | `page`      | int    | Numéro de page           | 1          |
 | `limit`     | int    | Max 1000                 | 100        |
 
@@ -791,12 +853,22 @@ Tous les mouvements **hors ventes et hors réceptions** : inventaires, correctio
 
 ### Synthèse par jour et site
 ```
-GET /api/mouvements/synthese?dateDebut=&dateFin=&site=
+GET /api/mouvements/synthese?dateDebut=&dateFin=&site=&page=&limit=
 ```
+
+| Paramètre   | Type   | Description                    | Défaut     |
+|-------------|--------|--------------------------------|------------|
+| `dateDebut` | date   | Date début `YYYY-MM-DD`        | 2024-01-01 |
+| `dateFin`   | date   | Date fin `YYYY-MM-DD`          | 2099-12-31 |
+| `site`      | string | Code site exact                | —          |
+| `page`      | int    | Numéro de page                 | 1          |
+| `limit`     | int    | Lignes par page (max 5000)     | 1000       |
 
 **Réponse** :
 ```json
 {
+  "page": 1,
+  "limit": 1000,
   "synthese": [
     {
       "jour": "2024-06-15",
@@ -854,6 +926,13 @@ Liste l'ensemble des règlements et paiements de tickets de caisse de la table `
 
 ## Performance
 
+> **Règles communes aux routes `/api/performance/*`** :
+> - Période par défaut : **30 derniers jours** (aujourd'hui inclus, heure de Paris). Si seule `dateFin` est fournie, `dateDebut = dateFin − 29 j` ; si seule `dateDebut` est fournie, `dateFin` = aujourd'hui.
+> - Période maximale : **3 ans** (1098 jours) → au-delà, `400`.
+> - Bornes **incluses** : `dateFin` couvre toute la journée.
+> - `site` = code site exact.
+> - **Définition unique du CA** : mouvements `genremvt IN (3, 4, 9)` ; `ca_ttc` / `ca_ht` / `qte_vendue` = valeurs absolues des lignes de montant TTC négatif (ventes brutes), `retours_ttc` = lignes positives, `marge` = Σ `margemvt`, `taux_marge` = marge / |Σ HT| × 100.
+
 ### Chiffre d'affaires
 ```
 GET /api/performance/ca
@@ -861,10 +940,12 @@ GET /api/performance/ca
 
 | Paramètre   | Type            | Description                  | Défaut     |
 |-------------|-----------------|------------------------------|------------|
-| `dateDebut` | date            | Date début `YYYY-MM-DD`      | 2024-01-01 |
-| `dateFin`   | date            | Date fin `YYYY-MM-DD`        | 2099-12-31 |
-| `site`      | string          | Filtrer par site             | tous       |
+| `dateDebut` | date            | Date début `YYYY-MM-DD`      | J-29       |
+| `dateFin`   | date            | Date fin `YYYY-MM-DD`        | aujourd'hui|
+| `site`      | string          | Code site exact              | tous       |
 | `groupBy`   | `jour` / `mois` | Granularité                  | `jour`     |
+
+> `periode` vaut `YYYY-MM-DD` (jour) ou `YYYY-MM` (mois).
 
 **Réponse** :
 ```json
@@ -898,12 +979,14 @@ GET /api/performance/hitparade
 
 | Paramètre   | Type                  | Description                    | Défaut     |
 |-------------|-----------------------|--------------------------------|------------|
-| `dateDebut` | date                  | Date début `YYYY-MM-DD`        | 2024-01-01 |
-| `dateFin`   | date                  | Date fin `YYYY-MM-DD`          | 2099-12-31 |
-| `site`      | string                | Filtrer par site               | tous       |
+| `dateDebut` | date                  | Date début `YYYY-MM-DD`        | J-29       |
+| `dateFin`   | date                  | Date fin `YYYY-MM-DD`          | aujourd'hui|
+| `site`      | string                | Code site exact                | tous       |
 | `limit`     | int                   | Nombre d'articles (max 500)    | 50         |
 | `groupBy`   | `ca` / `qte` / `marge`| Critère de classement          | `ca`       |
-| `codefou`   | string                | Filtrer par code fournisseur   | —          |
+| `codefou`   | string                | Code du fournisseur principal (partiel) | — |
+
+> Une ligne par article (`no_id`) et par site ; le fournisseur affiché est le fournisseur principal (`artfou1.preference = 1`, un seul par article).
 
 **Réponse** :
 ```json
@@ -915,6 +998,7 @@ GET /api/performance/hitparade
   "classementPar": "ca",
   "hitparade": [
     {
+      "no_id": 12345,
       "codein": "ABC123",
       "libelle1": "MON ARTICLE",
       "site": "001",
@@ -941,9 +1025,9 @@ GET /api/performance/ca/fournisseur?dateDebut=&dateFin=&site=
 
 | Paramètre   | Type   | Description              | Défaut     |
 |-------------|--------|--------------------------|------------|
-| `dateDebut` | date   | Date début `YYYY-MM-DD`  | 2024-01-01 |
-| `dateFin`   | date   | Date fin `YYYY-MM-DD`    | 2099-12-31 |
-| `site`      | string | Filtrer par site         | tous       |
+| `dateDebut` | date   | Date début `YYYY-MM-DD`  | J-29       |
+| `dateFin`   | date   | Date fin `YYYY-MM-DD`    | aujourd'hui|
+| `site`      | string | Code site exact          | tous       |
 
 **Réponse** :
 ```json
@@ -963,7 +1047,7 @@ GET /api/performance/ca/fournisseur?dateDebut=&dateFin=&site=
 }
 ```
 
-> La jointure se fait via `artfou1.preference = 1` (fournisseur principal de l'article) → `fouident.code` pour le nom.
+> La jointure se fait via `artfou1.preference = 1` (fournisseur principal de l'article, une seule ligne retenue par article) → `fouident.code` pour le nom.
 
 ---
 
@@ -974,7 +1058,7 @@ GET /api/performance/ca/nomenclature?dateDebut=&dateFin=&site=&niveau=1
 
 | Paramètre | Type | Description                          |
 |-----------|------|--------------------------------------|
-| `niveau`  | int  | Niveau de nomenclature (1 = racine)  |
+| `niveau`  | int  | Niveau de nomenclature `1`, `2` ou `3` (1 = racine) |
 
 **Réponse** :
 ```json
@@ -1010,6 +1094,7 @@ GET /api/performance/ca/gamme?dateDebut=&dateFin=&site=
       "libelle_gamme": "ÉTÉ 2024",
       "nb_articles": 85,
       "qte_vendue": 1700,
+      "ca_ht": 25130.00,
       "ca_ttc": 28900.00,
       "marge": 6450.00
     }
@@ -1017,24 +1102,26 @@ GET /api/performance/ca/gamme?dateDebut=&dateFin=&site=
 }
 ```
 
+> Un article présent dans plusieurs saisons d'une même gamme n'est compté qu'une fois dans cette gamme. Tri par CA TTC décroissant.
+
 ---
 
 ### Tableau de bord quotidien (Dashboard)
 ```
 GET /api/performance/dashboard
 ```
-Retourne une synthèse complète du jour demandé (par rapport au même jour à N-1) ainsi que les 3 Top 10 (CA, Quantité et Marge) par site.
+Retourne une synthèse complète du jour demandé (par rapport au **même jour de la semaine à N-1**, soit J-364) ainsi que les 3 Top 10 (CA, Quantité et Marge) par site.
 
 | Paramètre | Type   | Description                                       | Défaut     |
 |-----------|--------|---------------------------------------------------|------------|
-| `date`    | date   | Date cible `YYYY-MM-DD`                           | hier       |
-| `site`    | string | Filtrer par site (facultatif)                     | tous       |
+| `date`    | date   | Date cible `YYYY-MM-DD`                           | hier (heure de Paris) |
+| `site`    | string | Code site exact (facultatif)                      | tous       |
 
 **Réponse** :
 ```json
 {
   "date": "2026-03-20",
-  "date_n1": "2025-03-20",
+  "date_n1": "2025-03-21",
   "sites": [
     {
       "site": "001",
@@ -1118,7 +1205,8 @@ Retourne la synthèse de la publicité par site ainsi que les données d'écoule
 ```
 GET /api/commandes-auto?site=&codefou=
 ```
-Retourne les propositions de commandes auto agrégées par site et fournisseur, avec comparaison au franco de port.
+Retourne les propositions de commandes auto (`qtepropo > 0`) agrégées par site et fournisseur, avec comparaison au franco de port.
+`site` = code site exact, `codefou` = partiel. Les fournisseurs dont la commande auto (`foucad.datecdeauto`) date de plus de 7 jours apparaissent aussi ; leur franco provient alors uniquement de `fouport2`.
 
 ### Détail des articles proposés pour un fournisseur
 ```
@@ -1129,6 +1217,8 @@ Retourne le résumé (franco, quantités, montant) et le détail par article des
 ---
 
 ## Schéma de la Base de Données
+
+> Ces routes ne sont montées que si la variable `EXPOSE_SCHEMA=true` est définie côté serveur (sinon `404`). Elles restent soumises à la clé d'API et ne renvoient ni l'hôte ni le nom de la base.
 
 ### Structure complète de la base
 ```
@@ -1316,7 +1406,9 @@ GET /api/sync/status
 ```
 POST /api/photos/reindex
 ```
-Déclenche de façon asynchrone l'analyse des sitemaps produits de `lafoirfouille.fr` pour extraire et associer les URLs des fiches produits aux codes photos dans la table `ff_photo_index`.
+Déclenche l'analyse des sitemaps produits de `lafoirfouille.fr` pour extraire et associer les URLs des fiches produits aux codes photos dans la table `ff_photo_index`. La réponse est renvoyée à la fin de l'indexation.
+
+Clé d'API requise. Une seule indexation à la fois : un second appel pendant l'exécution renvoie `409`.
 
 **Réponse** :
 ```json
@@ -1349,19 +1441,31 @@ Retourne le nombre total de photos indexées, la date de la dernière indexation
 
 ```javascript
 const API_BASE = 'https://api.ffnancy.fr';
+const API_KEY  = '...'; // fournie par l'administrateur — ne pas committer
+
+// Appel authentifié (lève une erreur sur 4xx/5xx)
+async function api(path) {
+  const res = await fetch(`${API_BASE}${path}`, { headers: { 'X-API-Key': API_KEY } });
+  if (!res.ok) throw new Error(`${res.status} ${(await res.json()).error}`);
+  return res.json();
+}
 
 // Rechercher des articles
 async function rechercherArticles(search, page = 1) {
   const params = new URLSearchParams({ search, page, limit: 50 });
-  const res = await fetch(`${API_BASE}/api/articles?${params}`);
-  return res.json();
+  return api(`/api/articles?${params}`);
 }
 
 // Fiche complète d'un article
 async function getFicheArticle(id) {
-  const res = await fetch(`${API_BASE}/api/articles/${id}/referentiel`);
-  return res.json();
+  return api(`/api/articles/${id}/referentiel`);
 }
+
+// La photo est publique : utilisable directement dans une balise <img>
+// <img src="https://api.ffnancy.fr/api/articles/12345/photo">
+
+// NB : les exemples ci-dessous utilisent fetch() sans en-tête par concision —
+// en production, passer par api() ci-dessus (ou ajouter l'en-tête X-API-Key).
 
 // CA du mois en cours par jour
 async function getCaMoisEnCours() {
@@ -1408,21 +1512,129 @@ async function getCommandesFournisseur(codeFou) {
 | Code | Description |
 |------|-------------|
 | `200` | Succès |
-| `404` | Ressource introuvable (article, commande…) |
-| `500` | Erreur serveur (détail dans le champ `error`) |
+| `204` | Réponse à une requête CORS de pré-vol (`OPTIONS`) |
+| `400` | Paramètre invalide : date non `YYYY-MM-DD` ou inexistante, entier attendu, valeur hors liste, `dateDebut > dateFin`, période trop longue, paramètre répété (`?site=a&site=b`), corps JSON invalide… Le message précise le paramètre fautif. |
+| `401` | Clé d'API absente ou invalide |
+| `404` | Ressource ou route introuvable |
+| `409` | Indexation photos déjà en cours |
+| `429` | Trop de requêtes (voir l'en-tête `Retry-After`) |
+| `500` | Erreur interne — message générique, le détail n'est que dans les journaux serveur |
+| `502` | Source externe (lafoirfouille.fr) indisponible — proxy photo |
+| `503` | Base de données indisponible (`/api/health`) ou requête SQL trop longue (> 30 s) |
 
-**Format erreur** :
+**Format erreur** (toujours JSON) :
 ```json
-{ "error": "Article introuvable" }
+{ "error": "Paramètre 'dateDebut' : date attendue au format YYYY-MM-DD" }
 ```
+
+---
+
+## Variables d'environnement (serveur)
+
+| Variable | Défaut | Rôle |
+|----------|--------|------|
+| `API_KEYS` | *(vide)* | Clés d'API autorisées, séparées par des virgules. **Vide = authentification désactivée** (avertissement dans les logs au démarrage puis toutes les heures). |
+| `CORS_ORIGINS` | *(vide)* | Origines autorisées en CORS, séparées par des virgules (`*` = toutes). Vide = aucun en-tête CORS. |
+| `RATE_LIMIT_PER_MIN` | `600` | Requêtes max par minute et par IP. |
+| `TRUST_PROXY` | `loopback, linklocal, uniquelocal` | Proxys de confiance pour `X-Forwarded-For` (réglage Express `trust proxy`). |
+| `CACHE_TTL_SEC` | `300` | Durée du cache mémoire des réponses GET (`0` = désactivé). |
+| `EXPOSE_SCHEMA` | `false` | `true` pour monter `/api/schema*`. |
+| `PG_STATEMENT_TIMEOUT_MS` | `30000` | Délai max d'une requête SQL. |
+| `PG_POOL_MAX` | `10` | Taille du pool de connexions PostgreSQL. |
+| `PG_HOST`, `PG_PORT`, `PG_DB`, `PG_USER`, `PG_PASSWORD`, `API_PORT` | — | Connexion base / port d'écoute (inchangés). |
 
 ---
 
 ## Notes importantes
 
-- Les données sont en lecture seule — aucun endpoint d'écriture
+- Les données sont en lecture seule — aucun endpoint d'écriture (hors réindexation des photos)
 - Les données sont décalées d'au plus 24h (sync automatique à 6h45 heure Paris)
-- Les champs dates sont au format ISO 8601 UTC
-- La pagination commence à `page=1`
+- Les champs dates sont au format ISO 8601 UTC ; les regroupements par jour (`periode`, `jour`) sont renvoyés en `YYYY-MM-DD`
+- Paramètres de date : format strict `YYYY-MM-DD`, bornes **incluses** (`dateFin` couvre toute la journée)
+- Filtre `site` : **code site exact**, sauf là où la documentation indique « partiel » (`/articles/:id/mouvements`, `/articles/:id/dernier-fournisseur`, `/stock/article/:id/historique`, `/stock/article/:id/periode`, `/ranking`)
+- Recherches partielles : `%` et `_` sont des caractères ordinaires (pas de jokers)
+- La pagination commence à `page=1` ; une `limit` au-delà du maximum est ramenée au maximum
 - Le champ `no_id` est l'identifiant interne SQL Server de l'article
 - Les codes sites (`001`, `002`…) correspondent aux différents points de vente
+
+---
+
+# Analyses ajoutées en octobre 2026
+
+Ces endpoints exploitent les nouvelles données synchronisées depuis SQL Server : heure de chaque ticket, type de mouvement, règlements, motifs de remise caisse, objectifs, météo, historique des prix, promotions, suivi des commandes, litiges de réception, rotation, commandes clients et web.
+
+Règles communes :
+- Une clé d'API est requise (`X-API-Key`).
+- `dateDebut` et `dateFin` sont au format `YYYY-MM-DD`, bornes incluses. Sans dates, la période couvre les 30 derniers jours complets (90 ou 365 jours quand c'est précisé). La période est limitée à 3 ans.
+- `site` est un code exact, par exemple `292`.
+- **Ventes** = types de mouvement 11 (ventes clients) et 12 (retours clients), voir `/api/referentiels/types-mouvement`. Un ticket est identifié par `mvtart.libmvt`.
+
+> **Changement de définition du CA (`/api/performance/*`).** Le CA retenait `genremvt IN (3, 4, 9)`. Il comptait donc aussi les sorties de cession (genre 4), les démarques et les inventaires (genre 9 : vol, casse, périmé…). Il porte désormais uniquement sur les ventes et retours clients (types 11 et 12). Les montants baissent légèrement : ils sont maintenant exacts.
+
+## Ventes (`/api/ventes`)
+
+| Endpoint | Description |
+|---|---|
+| `GET /api/ventes/horaire?dateDebut&dateFin&site` | Par heure de la journée (heure du ticket) : CA TTC/HT, marge, nombre de tickets, articles, panier moyen, part du CA. |
+| `GET /api/ventes/jours?dateDebut&dateFin&site` | Par jour de la semaine (1 = lundi) : CA, tickets, CA moyen par jour. |
+| `GET /api/ventes/paniers?dateDebut&dateFin&site` | Indicateurs de panier : nombre de tickets, panier moyen et médian, articles et lignes par ticket, répartition par tranche (<10 €, 10-20, 20-50, 50-100, 100+). |
+| `GET /api/ventes/associations/:id?dateDebut&dateFin&site&limit=20` | Articles achetés dans les mêmes tickets que l'article `:id` (ventes croisées). |
+| `GET /api/ventes/reglements?dateDebut&dateFin` | Encaissements par mode de règlement (espèces, CB, avoirs, bons d'achat…), avec leur part. |
+| `GET /api/ventes/remises?dateDebut&dateFin&site&groupBy=motif\|valeur\|article&limit=100` | Remises en caisse : prix d'origine × quantité, CA encaissé et écart, par motif (`PUB`, `OPLIQ…`, `TARIF_CLIENT`…). |
+
+Exemple de réponse de `GET /api/ventes/horaire` :
+```json
+{ "periode": { "debut": "2026-09-17", "fin": "2026-10-16" }, "site": null,
+  "heures": [ { "heure": 10, "ca_ttc": "8123.40", "ca_ht": "6769.50", "marge": "3011.20",
+                "nb_tickets": "412", "nb_articles": "1630", "panier_moyen_ttc": "19.72", "part_ca_pct": 9.8 } ] }
+```
+
+## Pilotage (`/api/pilotage`)
+
+| Endpoint | Description |
+|---|---|
+| `GET /api/pilotage/objectifs?annee=2026&site&niveau=1\|2&nomenclature=<no_id N1>` | Budgets et objectifs calculés par Helios (`BUDGET_PILOTAGE`), par nomenclature : CA objectif / réalisé / N-1 / N-2, stock, marge, démarque connue et inconnue, taux de réalisation. Les données mensuelles sont dans `mensuel` (mois 1 = premier mois de l'exercice). |
+| `GET /api/pilotage/ca-jour?dateDebut&dateFin&site` | CA, marge et tickets par jour, recalculés depuis les tickets. |
+| `GET /api/pilotage/meteo?dateDebut&dateFin&site=292` | Pour chaque jour : temps (soleil, pluie…), température, CA, tickets et panier, avec une synthèse par type de temps. Période par défaut : 90 jours. |
+| `GET /api/pilotage/meteo/previsions?site` | Prévisions météo à venir. |
+| `GET /api/pilotage/demarque?dateDebut&dateFin&site&groupBy=type\|nomenclature\|article` | Démarque connue (vol, casse, périmé, inventaire, utilisation magasin, dons…) en quantité, en valeur PRMP et en valeur TTC. Les valeurs négatives sont des sorties. |
+| `GET /api/pilotage/fidelite?dateDebut&dateFin&site=292` | Part des tickets et du CA réalisés avec une carte de fidélité. Il s'agit d'agrégats quotidiens, sans donnée nominative. |
+
+## Prix et promotions (`/api/prix`)
+
+| Endpoint | Description |
+|---|---|
+| `GET /api/prix/article/:id` | Historique complet des prix de vente par site (`000` = centrale) et par tarif : date d'effet, date de fin, variation. |
+| `GET /api/prix/changements?depuis=YYYY-MM-DD&site=292&sens=hausse\|baisse` | Articles dont le prix a changé depuis une date : ancien prix, nouveau prix, variation en %. |
+| `GET /api/prix/etiquettes?traite=0\|1` | Changements de prix à étiqueter (`Etiquettes_Auto_PV`). |
+| `GET /api/prix/promotions?date=YYYY-MM-DD&site&search` | Opérations de remise actives à une date (aujourd'hui par défaut) : code, libellé, période, nombre d'articles, sites. |
+| `GET /api/prix/promotions/:periodeId/articles` | Articles d'une période de remise : remise en %, quantité conseillée, quantité vendue et CA pendant la période. |
+
+## Approvisionnement (`/api/appro`)
+
+| Endpoint | Description |
+|---|---|
+| `GET /api/appro/suivi-commandes?codefou&etat&site&enCours=true` | Dernier état de chaque commande fournisseur : container, incoterm, port d'arrivée, rendez-vous au dépôt, réception automatique. |
+| `GET /api/appro/litiges?dateDebut&dateFin&codefou&groupBy=fournisseur\|motif\|detail` | Quantités refusées à la réception et taux de litige par fournisseur ou par motif. Période par défaut : 90 jours. |
+| `GET /api/appro/fournisseurs/:code/conditions` | Conditions de règlement (escompte, échéances), délais normal et de sécurité, franco, et délai réel constaté (commande → réception) sur 12 mois. |
+| `GET /api/appro/rotation?site=292&filtre=surstock\|sans_vente\|tout` | Rotation du stock (`STOCKAGE_ROTATION`) : stock, ventes, ratio, valeur du stock, dates de dernière entrée et de dernière vente. |
+| `GET /api/appro/article/:id` | Fiche réassort d'un article : mini/maxi par site, notes, historique des changements de gamme, lots, stat permanente (ventes sur 4 semaines N et N-1), ranking Helios, historique hebdomadaire stock/ventes, stock web. |
+
+## Référentiels (`/api/referentiels`)
+
+`GET /api/referentiels` liste les référentiels disponibles. `GET /api/referentiels/:nom` en renvoie un, avec `:nom` parmi `types-mouvement`, `modes-reglement`, `sites`, `tarifs`, `etats-commande`, `motifs-refus` et `temps-meteo`. `GET /api/referentiels/inventaires/liste` donne les campagnes d'inventaire.
+
+## Commandes clients et web (`/api/clients`)
+
+Aucune donnée nominative (nom, adresse, téléphone, e-mail) n'est synchronisée.
+
+| Endpoint | Description |
+|---|---|
+| `GET /api/clients/commandes?dateDebut&dateFin&etat` | Commandes clients : synthèse par état (montant, reste à encaisser) et liste. Période par défaut : 365 jours. |
+| `GET /api/clients/commandes/:id` | Détail d'une commande client avec ses lignes. |
+| `GET /api/clients/web/commandes?dateDebut&dateFin` | Commandes web / click & collect : répartition par statut et délai moyen de traitement. |
+| `GET /api/clients/web/stock?article&interdit=true` | Stock exposé sur le site web, par magasin. |
+
+## Commandes fournisseurs : changement de source
+
+`GET /api/commandes`, `GET /api/commandes/:noCommande` et `GET /api/fournisseurs/:code/commandes` lisaient la table `CDEFOU_VIVANT`. Cette table n'est plus alimentée par Helios (identifiants vides), si bien que ces routes renvoyaient des listes vides. Elles lisent maintenant `commande_fou` et `cdefou_ligne`. Les nouveaux champs sont `num_commande`, `etat`, `total_commande` et `montant_port`. `prix_vente` vient de `cube_pv`. `commentaire`, `remise2` et `remise3` valent `null`.

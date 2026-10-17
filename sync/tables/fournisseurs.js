@@ -83,7 +83,7 @@ async function syncFournisseurs(force) {
       telephone:     r.TELEPHONE,
       email:         r.EMAIL,
     }));
-    const count = await fullRefresh(pg, 'fouadr1', rows, FOUADR1_COLS);
+    const count = await fullRefresh(pg, 'fouadr1', rows, FOUADR1_COLS, { force });
     await logSync(pg, 'fouadr1', count, 'ok');
     console.log(`[fouadr1] ${count} lignes refresh`);
   } catch (err) {
@@ -109,7 +109,7 @@ async function syncFournisseurs(force) {
       suividatecreation: r.SUIVIDATECREATION,
       suividatemodif:    r.SUIVIDATEMODIF,
     }));
-    const count = await fullRefresh(pg, 'fouident', rows, FOUIDENT_COLS);
+    const count = await fullRefresh(pg, 'fouident', rows, FOUIDENT_COLS, { force });
     await logSync(pg, 'fouident', count, 'ok');
     console.log(`[fouident] ${count} lignes refresh`);
   } catch (err) {

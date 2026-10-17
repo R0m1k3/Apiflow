@@ -1,225 +1,216 @@
 const express = require('express');
 const router = express.Router();
 const { getPool } = require('../config/database');
+const {
+  parseText, parseId, parsePositiveInt, parsePagination, parseDateRange, likeContains,
+} = require('../utils/params');
+const { SqlParams, dateRange, where } = require('../utils/sql');
+
+// Conditions communes : période + site (code exact) + article optionnel
+function communes(p, alias, q, { debut, fin }) {
+  const c = (col) => (alias ? `${alias}.${col}` : col);
+  const conds = [dateRange(c('datmvt'), p, debut, fin)];
+  const site = parseText(q.site, 'site', { max: 20 });
+  if (site) conds.push(`${c('site')} = ${p.add(site)}`);
+  return conds;
+}
 
 // GET /api/mouvements/types - Codes GenreMvt distincts avec total
-// Pour GenreMvt=3 (ventes), LibMvt contient les numéros de ticket → on groupe uniquement par GenreMvt
+// Pour GenreMvt=3 (ventes), LibMvt contient les numéros de ticket → libellé générique.
+// Une seule passe sur mvtart (libellé représentatif = MIN(libmvt)).
 router.get('/types', async (req, res) => {
-  try {
-    const pool = getPool();
-    // Libellés représentatifs pour les types hors ventes
-    const libmvts = await pool.query(`
-      SELECT DISTINCT ON (GenreMvt) GenreMvt, LibMvt
-      FROM MvtArt
-      WHERE GenreMvt != 3
-      ORDER BY GenreMvt, LibMvt
-    `);
-    const labelsMap = Object.fromEntries(libmvts.rows.map(r => [r.genremvt, r.libmvt]));
-
-    const result = await pool.query(`
-      SELECT GenreMvt, COUNT(*) AS nb_occurrences
-      FROM MvtArt
-      GROUP BY GenreMvt
-      ORDER BY GenreMvt
+  const result = await getPool().query(`
+      SELECT genremvt, COUNT(*) AS nb_occurrences, MIN(libmvt) AS libmvt
+      FROM mvtart
+      GROUP BY genremvt
+      ORDER BY genremvt
     `);
 
-    res.json({
-      types: result.rows.map(r => ({
-        genremvt: r.genremvt,
-        libmvt: r.genremvt == 3 ? '(numéros de ticket)' : (labelsMap[r.genremvt] ?? null),
-        nb_occurrences: r.nb_occurrences,
-      }))
-    });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
+  res.json({
+    types: result.rows.map(r => ({
+      genremvt: r.genremvt,
+      libmvt: r.genremvt == 3 ? '(numéros de ticket)' : (r.libmvt ?? null),
+      nb_occurrences: r.nb_occurrences,
+    })),
+  });
 });
 
 // GET /api/mouvements/articles?dateDebut=&dateFin=&site=&codefou=&genremvt=&page=&limit=
 router.get('/articles', async (req, res) => {
-  try {
-    const pool = getPool();
-    const { dateDebut = '2024-01-01', dateFin = '2099-12-31', site = '', codefou = '', genremvt = '', page = 1, limit = 100 } = req.query;
-    const pageNum  = Math.max(1, parseInt(page)  || 1);
-    const limitNum = Math.max(1, Math.min(parseInt(limit) || 100, 1000));
-    const offsetNum = (pageNum - 1) * limitNum;
-    const genreFilter = genremvt !== '' ? parseInt(genremvt) : null;
+  const q = req.query;
+  const range = parseDateRange(q, { defDebut: '2024-01-01', defFin: '2099-12-31' });
+  const codefou = parseText(q.codefou, 'codefou', { max: 50 });
+  const genremvt = parsePositiveInt(q.genremvt, 'genremvt', { def: null, min: 0, max: 9999 });
+  const { page, limit, offset } = parsePagination(q, { defLimit: 100, maxLimit: 1000 });
 
-    const result = await pool.query(`
+  const p = new SqlParams();
+  const conds = communes(p, 'm', q, range);
+  // Filtre fournisseur uniquement s'il est fourni (sinon les CODEFOU NULL étaient exclus)
+  if (codefou) conds.push(`m.codefou LIKE ${p.add(likeContains(codefou))}`);
+  if (genremvt !== null) conds.push(`m.genremvt = ${p.add(genremvt)}`);
+
+  const result = await getPool().query(`
       SELECT
-        m.DatMvt, m.Site,
-        a.CODEIN, a.LIBELLE1,
-        m.LibMvt, m.GenreMvt, m.QteMvt, m.ValMvt,
-        m.MntMvtHt, m.MntMvtTTC, m.MargeMvt,
-        m.QteStock, m.Prmp, m.ValStock,
-        m.CODEFOU AS codefou_mouvement,
-        -- Pour les ventes (GenreMvt=3), le vrai fournisseur = dernière entrée avant cette vente
-        CASE WHEN m.GenreMvt = 3 THEN (
-          SELECT e.CODEFOU FROM MvtArt e
-          WHERE e.ArtNoId = m.ArtNoId AND e.Site = m.Site
-            AND e.GenreMvt = 1 AND e.CODEFOU IS NOT NULL AND TRIM(e.CODEFOU) != ''
-            AND e.DatMvt <= m.DatMvt
-          ORDER BY e.DatMvt DESC LIMIT 1
-        ) ELSE TRIM(m.CODEFOU) END AS codefou_reel,
-        CASE WHEN m.GenreMvt = 3 THEN (
-          SELECT fi.nom FROM MvtArt e
-          LEFT JOIN fouident fi ON fi.code = TRIM(e.CODEFOU)
-          WHERE e.ArtNoId = m.ArtNoId AND e.Site = m.Site
-            AND e.GenreMvt = 1 AND e.CODEFOU IS NOT NULL AND TRIM(e.CODEFOU) != ''
-            AND e.DatMvt <= m.DatMvt
-          ORDER BY e.DatMvt DESC LIMIT 1
+        m.datmvt, m.site,
+        a.codein, a.libelle1,
+        m.libmvt, m.genremvt, m.qtemvt, m.valmvt,
+        m.mntmvtht, m.mntmvtttc, m.margemvt,
+        m.qtestock, m.prmp, m.valstock,
+        m.codefou AS codefou_mouvement,
+        -- Pour les ventes (genremvt=3), le vrai fournisseur = dernière entrée avant cette vente
+        CASE WHEN m.genremvt = 3 THEN (
+          SELECT TRIM(e.codefou) FROM mvtart e
+          WHERE e.artnoid = m.artnoid AND e.site = m.site
+            AND e.genremvt = 1 AND e.codefou IS NOT NULL AND TRIM(e.codefou) != ''
+            AND e.datmvt <= m.datmvt
+          ORDER BY e.datmvt DESC LIMIT 1
+        ) ELSE TRIM(m.codefou) END AS codefou_reel,
+        CASE WHEN m.genremvt = 3 THEN (
+          SELECT fi.nom FROM mvtart e
+          LEFT JOIN fouident fi ON TRIM(fi.code) = TRIM(e.codefou)
+          WHERE e.artnoid = m.artnoid AND e.site = m.site
+            AND e.genremvt = 1 AND e.codefou IS NOT NULL AND TRIM(e.codefou) != ''
+            AND e.datmvt <= m.datmvt
+          ORDER BY e.datmvt DESC LIMIT 1
         ) ELSE (
           SELECT fi2.nom FROM fouident fi2
-          WHERE fi2.code = TRIM(m.CODEFOU)
+          WHERE TRIM(fi2.code) = TRIM(m.codefou)
+          LIMIT 1
         ) END AS nom_fournisseur_reel
-      FROM MvtArt m
-      JOIN ARTICLES a ON a.NO_ID = m.ArtNoId
-      WHERE m.DatMvt BETWEEN $1 AND $2
-        AND m.Site LIKE $3
-        AND m.CODEFOU LIKE $4
-        AND ($5::int IS NULL OR m.GenreMvt = $5)
-      ORDER BY m.DatMvt DESC
-      LIMIT ${limitNum} OFFSET ${offsetNum}
-    `, [dateDebut, dateFin, `%${site}%`, `%${codefou}%`, genreFilter]);
+      FROM mvtart m
+      JOIN articles a ON a.no_id = m.artnoid
+      ${where(conds)}
+      ORDER BY m.datmvt DESC, m.no_id DESC
+      LIMIT ${p.add(limit)} OFFSET ${p.add(offset)}
+    `, p.values);
 
-    res.json({ page: pageNum, limit: limitNum, mouvements: result.rows });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
+  res.json({ page, limit, mouvements: result.rows });
 });
 
 // GET /api/mouvements/entrees?dateDebut=&dateFin=&site=&artNoId=&page=&limit=
 // Entrées en stock uniquement (GenreMvt = 1) avec date de création article
 router.get('/entrees', async (req, res) => {
-  try {
-    const pool = getPool();
-    const { dateDebut = '2024-01-01', dateFin = '2099-12-31', site = '', artNoId = '', page = 1, limit = 100 } = req.query;
-    const pageNum  = Math.max(1, parseInt(page)  || 1);
-    const limitNum = Math.max(1, Math.min(parseInt(limit) || 100, 1000));
-    const offsetNum = (pageNum - 1) * limitNum;
+  const q = req.query;
+  const range = parseDateRange(q, { defDebut: '2024-01-01', defFin: '2099-12-31' });
+  const { page, limit, offset } = parsePagination(q, { defLimit: 100, maxLimit: 1000 });
 
-    const result = await pool.query(`
-      SELECT
-        m.DatMvt AS date_entree,
-        m.Site,
-        a.NO_ID AS artnoid,
-        a.CODEIN,
-        a.LIBELLE1,
-        a.SUIVIDATECREATION AS date_creation_article,
-        m.LibMvt AS libelle_mouvement,
-        m.QteMvt AS qte_entree,
-        m.Prmp AS prmp,
-        m.QteStock AS stock_apres_entree,
-        m.CODEFOU AS codefou
-      FROM MvtArt m
-      JOIN ARTICLES a ON a.NO_ID = m.ArtNoId
-      WHERE m.GenreMvt = 1
-        AND m.DatMvt BETWEEN $1 AND $2
-        AND m.Site LIKE $3
-        AND ($4 = '' OR m.ArtNoId::text = $4)
-      ORDER BY m.DatMvt DESC
-      LIMIT ${limitNum} OFFSET ${offsetNum}
-    `, [dateDebut, dateFin, `%${site}%`, artNoId]);
-
-    res.json({ page: pageNum, limit: limitNum, entrees: result.rows });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
+  const p = new SqlParams();
+  const conds = ['m.genremvt = 1', ...communes(p, 'm', q, range)];
+  if (q.artNoId !== undefined && q.artNoId !== '') {
+    conds.push(`m.artnoid = ${p.add(parseId(q.artNoId, 'artNoId'))}`);
   }
+
+  const result = await getPool().query(`
+      SELECT
+        m.datmvt AS date_entree,
+        m.site,
+        a.no_id AS artnoid,
+        a.codein,
+        a.libelle1,
+        a.suividatecreation AS date_creation_article,
+        m.libmvt AS libelle_mouvement,
+        m.qtemvt AS qte_entree,
+        m.prmp AS prmp,
+        m.qtestock AS stock_apres_entree,
+        m.codefou AS codefou
+      FROM mvtart m
+      JOIN articles a ON a.no_id = m.artnoid
+      ${where(conds)}
+      ORDER BY m.datmvt DESC, m.no_id DESC
+      LIMIT ${p.add(limit)} OFFSET ${p.add(offset)}
+    `, p.values);
+
+  res.json({ page, limit, entrees: result.rows });
 });
 
 // GET /api/mouvements/regularisations?dateDebut=&dateFin=&site=&artNoId=&page=&limit=
 // Mouvements hors ventes (GenreMvt=3) et hors entrées standard (GenreMvt=1)
 // = inventaires, corrections, démarques, transferts, etc.
 router.get('/regularisations', async (req, res) => {
-  try {
-    const pool = getPool();
-    const { dateDebut = '2024-01-01', dateFin = '2099-12-31', site = '', artNoId = '', page = 1, limit = 100 } = req.query;
-    const pageNum  = Math.max(1, parseInt(page)  || 1);
-    const limitNum = Math.max(1, Math.min(parseInt(limit) || 100, 1000));
-    const offsetNum = (pageNum - 1) * limitNum;
+  const q = req.query;
+  const range = parseDateRange(q, { defDebut: '2024-01-01', defFin: '2099-12-31' });
+  const { page, limit, offset } = parsePagination(q, { defLimit: 100, maxLimit: 1000 });
 
-    const result = await pool.query(`
-      SELECT
-        m.DatMvt AS date_mouvement,
-        m.Site,
-        a.NO_ID AS artnoid,
-        a.CODEIN,
-        a.LIBELLE1,
-        m.GenreMvt,
-        m.LibMvt AS libelle_mouvement,
-        m.QteMvt AS qte,
-        m.ValMvt AS valeur,
-        m.QteStock AS stock_apres,
-        m.Prmp AS prmp
-      FROM MvtArt m
-      JOIN ARTICLES a ON a.NO_ID = m.ArtNoId
-      WHERE m.GenreMvt NOT IN (1, 3)
-        AND m.DatMvt BETWEEN $1 AND $2
-        AND m.Site LIKE $3
-        AND ($4 = '' OR m.ArtNoId::text = $4)
-      ORDER BY m.DatMvt DESC
-      LIMIT ${limitNum} OFFSET ${offsetNum}
-    `, [dateDebut, dateFin, `%${site}%`, artNoId]);
-
-    res.json({ page: pageNum, limit: limitNum, regularisations: result.rows });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
+  const p = new SqlParams();
+  const conds = ['m.genremvt NOT IN (1, 3)', ...communes(p, 'm', q, range)];
+  if (q.artNoId !== undefined && q.artNoId !== '') {
+    conds.push(`m.artnoid = ${p.add(parseId(q.artNoId, 'artNoId'))}`);
   }
+
+  const result = await getPool().query(`
+      SELECT
+        m.datmvt AS date_mouvement,
+        m.site,
+        a.no_id AS artnoid,
+        a.codein,
+        a.libelle1,
+        m.genremvt,
+        m.libmvt AS libelle_mouvement,
+        m.qtemvt AS qte,
+        m.valmvt AS valeur,
+        m.qtestock AS stock_apres,
+        m.prmp AS prmp
+      FROM mvtart m
+      JOIN articles a ON a.no_id = m.artnoid
+      ${where(conds)}
+      ORDER BY m.datmvt DESC, m.no_id DESC
+      LIMIT ${p.add(limit)} OFFSET ${p.add(offset)}
+    `, p.values);
+
+  res.json({ page, limit, regularisations: result.rows });
 });
 
 // GET /api/mouvements/reglements?dateDebut=&dateFin=&page=&limit=
 router.get('/reglements', async (req, res) => {
-  try {
-    const pool = getPool();
-    const { dateDebut = '2024-01-01', dateFin = '2099-12-31', page = 1, limit = 100 } = req.query;
-    const pageNum  = Math.max(1, parseInt(page)  || 1);
-    const limitNum = Math.max(1, Math.min(parseInt(limit) || 100, 1000));
-    const offsetNum = (pageNum - 1) * limitNum;
+  const range = parseDateRange(req.query, { defDebut: '2024-01-01', defFin: '2099-12-31' });
+  const { page, limit, offset } = parsePagination(req.query, { defLimit: 100, maxLimit: 1000 });
 
-    const result = await pool.query(`
+  const p = new SqlParams();
+  const conds = [dateRange('datmvt', p, range.debut, range.fin)];
+
+  const result = await getPool().query(`
       SELECT
-        DatMvt, CodTick, CodCarteCli, CodDev,
-        MntReg, MntRegDev, ClientNom, Echeance,
-        REFERENCE, TYPEREG, SuiviDateCreation
-      FROM MvtReg
-      WHERE DatMvt BETWEEN $1 AND $2
-      ORDER BY DatMvt DESC
-      LIMIT ${limitNum} OFFSET ${offsetNum}
-    `, [dateDebut, dateFin]);
+        datmvt, codtick, codcartecli, coddev,
+        mntreg, mntregdev, clientnom, echeance,
+        reference, typereg, suividatecreation
+      FROM mvtreg
+      ${where(conds)}
+      ORDER BY datmvt DESC
+      LIMIT ${p.add(limit)} OFFSET ${p.add(offset)}
+    `, p.values);
 
-    res.json({ page: pageNum, limit: limitNum, reglements: result.rows });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
+  res.json({ page, limit, reglements: result.rows });
 });
 
-// GET /api/mouvements/synthese?dateDebut=&dateFin=&site= - Synthèse par jour/site
+// GET /api/mouvements/synthese?dateDebut=&dateFin=&site=&page=&limit= - Synthèse par jour/site
+// Paginé (limit 1000 par défaut, max 5000).
 router.get('/synthese', async (req, res) => {
-  try {
-    const pool = getPool();
-    const { dateDebut = '2024-01-01', dateFin = '2099-12-31', site = '' } = req.query;
+  const q = req.query;
+  const range = parseDateRange(q, { defDebut: '2024-01-01', defFin: '2099-12-31' });
+  const { page, limit, offset } = parsePagination(q, { defLimit: 1000, maxLimit: 5000 });
 
-    const result = await pool.query(`
+  const p = new SqlParams();
+  const conds = communes(p, null, q, range);
+
+  const result = await getPool().query(`
       SELECT
-        DatMvt::DATE AS Jour,
-        Site,
-        GenreMvt,
-        COUNT(*) AS NB_MVT,
-        SUM(QteMvt) AS QTE_TOTALE,
-        SUM(MntMvtHt) AS MNT_HT,
-        SUM(MntMvtTTC) AS MNT_TTC,
-        SUM(MargeMvt) AS MARGE
-      FROM MvtArt
-      WHERE DatMvt BETWEEN $1 AND $2
-        AND Site LIKE $3
-      GROUP BY DatMvt::DATE, Site, GenreMvt
-      ORDER BY Jour DESC, Site
-    `, [dateDebut, dateFin, `%${site}%`]);
+        -- Jour en texte YYYY-MM-DD (évite le décalage de fuseau du type DATE côté Node)
+        TO_CHAR(datmvt, 'YYYY-MM-DD') AS jour,
+        site,
+        genremvt,
+        COUNT(*) AS nb_mvt,
+        SUM(qtemvt) AS qte_totale,
+        SUM(mntmvtht) AS mnt_ht,
+        SUM(mntmvtttc) AS mnt_ttc,
+        SUM(margemvt) AS marge
+      FROM mvtart
+      ${where(conds)}
+      GROUP BY TO_CHAR(datmvt, 'YYYY-MM-DD'), site, genremvt
+      ORDER BY jour DESC, site, genremvt
+      LIMIT ${p.add(limit)} OFFSET ${p.add(offset)}
+    `, p.values);
 
-    res.json({ synthese: result.rows });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
+  res.json({ page, limit, synthese: result.rows });
 });
 
 module.exports = router;

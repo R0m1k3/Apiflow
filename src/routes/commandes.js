@@ -1,137 +1,148 @@
 const express = require('express');
 const router = express.Router();
 const { getPool } = require('../config/database');
+const { parseText, parseId, parsePagination, parseDateRange, likeContains } = require('../utils/params');
+const { SqlParams, dateRange, where } = require('../utils/sql');
+const { HttpError } = require('../utils/errors');
 
 // GET /api/commandes?dateDebut=&dateFin=&codefou=&page=&limit=
 router.get('/', async (req, res) => {
-  try {
-    const pool = getPool();
-    const { dateDebut = '2020-01-01', dateFin = '2099-12-31', codefou = '', page = 1, limit = 100 } = req.query;
-    const pageNum  = Math.max(1, parseInt(page)  || 1);
-    const limitNum = Math.max(1, Math.min(parseInt(limit) || 100, 1000));
-    const offsetNum = (pageNum - 1) * limitNum;
+  const { debut, fin } = parseDateRange(req.query, { defDebut: '2020-01-01', defFin: '2099-12-31' });
+  const codefou = parseText(req.query.codefou, 'codefou', { max: 50 });
+  const { page, limit, offset } = parsePagination(req.query, { defLimit: 100, maxLimit: 1000 });
 
-    const result = await pool.query(`
+  const p = new SqlParams();
+  const conds = [dateRange('c.cdedate', p, debut, fin)];
+  if (codefou) conds.push(`TRIM(c.fouident_code) ILIKE ${p.add(likeContains(codefou))}`);
+  const etat = parseText(req.query.etat, 'etat', { max: 10 });
+  if (etat) conds.push(`c.cdeetat = ${p.add(etat)}`);
+
+  const result = await getPool().query(`
       SELECT
-        cv.CDEFOU_LIGNE_COM_NO_ID    AS NO_COMMANDE,
-        f.CODE                        AS CODEFOU,
-        cv.ARTICLES_CODEIN            AS CODEIN,
-        cv.ARTICLES_LIBELLE1          AS LIBELLE,
-        cv.ARTFOU1_REFERENCE          AS REF_FOU,
-        cv.ARTFOU1_EAN13              AS EAN13,
-        cv.ARTFOU1_ITF                AS ITF,
-        cv.CDEFOU_LIGNE_QTECDE        AS QTE_CDE,
-        cv.CDEFOU_LIGNE_PRIXBRUT      AS PRIX_BRUT,
-        cv.CDEFOU_LIGNE_REMISE        AS REMISE,
-        cv.CDEFOU_LIGNE_PRIXNET       AS PRIX_NET,
-        cv.CDEFOU_LIGNE_MONTANT       AS MONTANT,
-        cv.CDEFOU_LIGNE_PRIXVENTE     AS PRIX_VENTE,
-        cv.CDEFOU_LIGNE_QTEACC        AS QTE_ACCEPTEE,
-        cv.CDEFOU_LIGNE_QTEANN        AS QTE_ANNULEE,
-        cv.CDEFOU_LIGNE_QTEATT        AS QTE_ATTENTE,
-        cv.CDEFOU_LIGNE_QTEREL        AS QTE_RELIQUAT,
-        cv.CDEFOU_LIGNE_CDELIGTARD    AS DATE_LIVRAISON_CIBLE,
-        cv.CDEFOU_LIGNE_CDELIGTOT     AS DATE_LIVRAISON_TOT,
-        cv.COMMENTAIRE,
-        cv.SUIVIDATECREATION          AS DATE_COMMANDE
-      FROM CDEFOU_VIVANT cv
-      JOIN ARTFOU1 f ON f.NO_ID = cv.ARTFOU1_NO_ID
-      WHERE cv.SUIVIDATECREATION BETWEEN $1 AND $2
-        AND f.CODE LIKE $3
-      ORDER BY cv.SUIVIDATECREATION DESC
-      LIMIT ${limitNum} OFFSET ${offsetNum}
-    `, [dateDebut, dateFin, `%${codefou}%`]);
+        c.no_id                      AS no_commande,
+        c.cdenum                     AS num_commande,
+        TRIM(c.fouident_code)        AS codefou,
+        c.cdeetat                    AS etat,
+        a.codein                     AS codein,
+        a.libelle1                   AS libelle,
+        f.reference                  AS ref_fou,
+        f.ean13                      AS ean13,
+        f.itf                        AS itf,
+        cl.qtecde                    AS qte_cde,
+        cl.prixbrut                  AS prix_brut,
+        cl.remise                    AS remise,
+        cl.prixnet                   AS prix_net,
+        cl.montant                   AS montant,
+        pv.pv                        AS prix_vente,
+        cl.qteacc                    AS qte_acceptee,
+        cl.qteann                    AS qte_annulee,
+        cl.qteatt                    AS qte_attente,
+        cl.qterel                    AS qte_reliquat,
+        cl.cdeligtard                AS date_livraison_cible,
+        cl.cdeligtot                 AS date_livraison_tot,
+        NULL::text                   AS commentaire,
+        c.cdedate                    AS date_commande
+      -- CDEFOU_VIVANT n'est plus alimentée côté SQL Server (oct. 2026) :
+      -- lignes de commande = cdefou_ligne + en-tête commande_fou
+      FROM cdefou_ligne cl
+      JOIN commande_fou c   ON c.no_id = cl.commande_fou_no_id
+      LEFT JOIN artfou1 f   ON f.no_id = cl.artfou1_no_id
+      LEFT JOIN articles a  ON a.no_id = f.art_no_id
+      LEFT JOIN cube_pv pv  ON pv.artnoid = f.art_no_id AND pv.site = c.sit_cod_desti
+      ${where(conds)}
+      ORDER BY c.cdedate DESC, c.no_id, cl.no_id
+      LIMIT ${p.add(limit)} OFFSET ${p.add(offset)}
+    `, p.values);
 
-    res.json({ page: pageNum, limit: limitNum, commandes: result.rows });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
+  res.json({ page, limit, commandes: result.rows });
 });
 
 // GET /api/commandes/:noCommande - Détail d'une commande
 router.get('/:noCommande', async (req, res) => {
-  try {
-    const pool = getPool();
+  const noCommande = parseId(req.params.noCommande, 'noCommande');
 
-    const result = await pool.query(`
+  const result = await getPool().query(`
       SELECT
-        cv.CDEFOU_LIGNE_COM_NO_ID    AS NO_COMMANDE,
-        f.CODE                        AS CODEFOU,
-        cv.ARTICLES_CODEIN            AS CODEIN,
-        cv.ARTICLES_LIBELLE1          AS LIBELLE,
-        cv.ARTICLES_LIBELLE2          AS LIBELLE2,
-        cv.ARTFOU1_REFERENCE          AS REF_FOU,
-        cv.ARTFOU1_EAN13              AS EAN13,
-        cv.ARTFOU1_ITF                AS ITF,
-        cv.CDEFOU_LIGNE_QTECDE        AS QTE_CDE,
-        cv.CDEFOU_LIGNE_PRIXBRUT      AS PRIX_BRUT,
-        cv.CDEFOU_LIGNE_REMISE        AS REMISE,
-        cv.CDEFOU_LIGNE_REMISE2       AS REMISE2,
-        cv.CDEFOU_LIGNE_REMISE3       AS REMISE3,
-        cv.CDEFOU_LIGNE_PRIXNET       AS PRIX_NET,
-        cv.CDEFOU_LIGNE_MONTANT       AS MONTANT,
-        cv.CDEFOU_LIGNE_PRIXVENTE     AS PRIX_VENTE,
-        cv.CDEFOU_LIGNE_GRATUIT       AS QTE_GRATUITE,
-        cv.CDEFOU_LIGNE_QTEACC        AS QTE_ACCEPTEE,
-        cv.CDEFOU_LIGNE_QTEANN        AS QTE_ANNULEE,
-        cv.CDEFOU_LIGNE_QTEATT        AS QTE_ATTENTE,
-        cv.CDEFOU_LIGNE_QTEREL        AS QTE_RELIQUAT,
-        cv.CDEFOU_LIGNE_CDELIGTARD    AS DATE_LIVRAISON_CIBLE,
-        cv.COTISATION_LOGISTIQUE,
-        cv.FRAISLOGISTIC, cv.TRANSIT, cv.DISTRIBUTION, cv.TAXE,
-        cv.COMMENTAIRE,
-        cv.SUIVIDATECREATION          AS DATE_COMMANDE
-      FROM CDEFOU_VIVANT cv
-      JOIN ARTFOU1 f ON f.NO_ID = cv.ARTFOU1_NO_ID
-      WHERE cv.CDEFOU_LIGNE_COM_NO_ID = $1
-      ORDER BY cv.ARTICLES_LIBELLE1
-    `, [req.params.noCommande]);
+        c.no_id                      AS no_commande,
+        c.cdenum                     AS num_commande,
+        TRIM(c.fouident_code)        AS codefou,
+        c.cdeetat                    AS etat,
+        a.codein                     AS codein,
+        a.libelle1                   AS libelle,
+        a.libelle2                   AS libelle2,
+        f.reference                  AS ref_fou,
+        f.ean13                      AS ean13,
+        f.itf                        AS itf,
+        cl.qtecde                    AS qte_cde,
+        cl.prixbrut                  AS prix_brut,
+        cl.remise                    AS remise,
+        NULL::numeric                AS remise2,
+        NULL::numeric                AS remise3,
+        cl.prixnet                   AS prix_net,
+        cl.montant                   AS montant,
+        pv.pv                        AS prix_vente,
+        cl.gratuit                   AS qte_gratuite,
+        cl.qteacc                    AS qte_acceptee,
+        cl.qteann                    AS qte_annulee,
+        cl.qteatt                    AS qte_attente,
+        cl.qterel                    AS qte_reliquat,
+        cl.cdeligtard                AS date_livraison_cible,
+        cl.cdeligtot                 AS date_livraison_tot,
+        NULL::text                   AS commentaire,
+        c.cdetot                     AS total_commande,
+        c.cdeportmontant             AS montant_port,
+        c.cdedate                    AS date_commande
+      -- CDEFOU_VIVANT n'est plus alimentée côté SQL Server (oct. 2026) :
+      -- lignes de commande = cdefou_ligne + en-tête commande_fou
+      FROM cdefou_ligne cl
+      JOIN commande_fou c   ON c.no_id = cl.commande_fou_no_id
+      LEFT JOIN artfou1 f   ON f.no_id = cl.artfou1_no_id
+      LEFT JOIN articles a  ON a.no_id = f.art_no_id
+      LEFT JOIN cube_pv pv  ON pv.artnoid = f.art_no_id AND pv.site = c.sit_cod_desti
+      WHERE c.no_id = $1
+      ORDER BY a.libelle1
+    `, [noCommande]);
 
-    if (!result.rows.length)
-      return res.status(404).json({ error: 'Commande introuvable' });
+  if (!result.rows.length) throw new HttpError(404, 'Commande introuvable');
 
-    res.json({
-      noCommande: req.params.noCommande,
-      nbLignes: result.rows.length,
-      montantTotal: result.rows.reduce((s, l) => s + (l.montant || 0), 0),
-      lignes: result.rows,
-    });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
+  // NUMERIC est renvoyé en chaîne par pg : conversion avant la somme
+  const total = result.rows.reduce((s, l) => s + (Number(l.montant) || 0), 0);
+
+  res.json({
+    noCommande,
+    nbLignes: result.rows.length,
+    montantTotal: Math.round(total * 10000) / 10000,
+    lignes: result.rows,
+  });
 });
 
 // GET /api/commandes/receptions/liste?dateDebut=&dateFin=&page=&limit=
 router.get('/receptions/liste', async (req, res) => {
-  try {
-    const pool = getPool();
-    const { dateDebut = '2020-01-01', dateFin = '2099-12-31', page = 1, limit = 100 } = req.query;
-    const pageNum  = Math.max(1, parseInt(page)  || 1);
-    const limitNum = Math.max(1, Math.min(parseInt(limit) || 100, 1000));
-    const offsetNum = (pageNum - 1) * limitNum;
+  const { debut, fin } = parseDateRange(req.query, { defDebut: '2020-01-01', defFin: '2099-12-31' });
+  const { page, limit, offset } = parsePagination(req.query, { defLimit: 100, maxLimit: 1000 });
 
-    const result = await pool.query(`
+  const p = new SqlParams();
+  const conds = [dateRange('rl.suividatecreation', p, debut, fin)];
+
+  const result = await getPool().query(`
       SELECT
-        rl.NO_ID, rl.CDEFOU_RECEPTION_NO_ID,
-        rl.QTEBL, rl.QTEREC, rl.QTEACC, rl.QTEREF, rl.QTEAFF,
-        rl.PRIBRUT, rl.REMISE, rl.PRIREC, rl.MNTREC,
-        rl.MOTIFREFUS, rl.RECPB, rl.RECPBOK,
-        f.CODE AS CODEFOU,
-        f.REFERENCE AS REF_FOU, f.EAN13,
-        a.CODEIN, a.LIBELLE1,
-        rl.SUIVIDATECREATION AS DATE_RECEPTION
-      FROM CDEFOU_RECEPLIG rl
-      JOIN ARTFOU1 f ON f.NO_ID = rl.ARTFOU1_NO_ID
-      JOIN ARTICLES a ON a.NO_ID = f.ART_NO_ID
-      WHERE rl.SUIVIDATECREATION BETWEEN $1 AND $2
-      ORDER BY rl.SUIVIDATECREATION DESC
-      LIMIT ${limitNum} OFFSET ${offsetNum}
-    `, [dateDebut, dateFin]);
+        rl.no_id, rl.cdefou_reception_no_id,
+        rl.qtebl, rl.qterec, rl.qteacc, rl.qteref, rl.qteaff,
+        rl.pribrut, rl.remise, rl.prirec, rl.mntrec,
+        rl.motifrefus, rl.recpb, rl.recpbok,
+        f.code AS codefou,
+        f.reference AS ref_fou, f.ean13,
+        a.codein, a.libelle1,
+        rl.suividatecreation AS date_reception
+      FROM cdefou_receplig rl
+      JOIN artfou1 f ON f.no_id = rl.artfou1_no_id
+      JOIN articles a ON a.no_id = f.art_no_id
+      ${where(conds)}
+      ORDER BY rl.suividatecreation DESC, rl.no_id
+      LIMIT ${p.add(limit)} OFFSET ${p.add(offset)}
+    `, p.values);
 
-    res.json({ page: pageNum, limit: limitNum, receptions: result.rows });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
+  res.json({ page, limit, receptions: result.rows });
 });
 
 module.exports = router;

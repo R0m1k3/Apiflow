@@ -35,57 +35,77 @@ async function batchUpsert(pg, table, rows, pk, cols) {
 }
 
 /**
- * Full refresh : TRUNCATE puis INSERT en masse.
+ * Full refresh transactionnel : DELETE + INSERT dans UNE transaction.
+ * - les lecteurs (API) continuent de voir l'ancienne version jusqu'au COMMIT ;
+ * - en cas d'erreur, ROLLBACK : la table reste intacte ;
+ * - garde-fou : si la source renvoie < 50 % des lignes existantes (cube vide,
+ *   requête tronquée…), on annule, sauf `force`.
  */
-async function fullRefresh(pg, table, rows, cols) {
-  if (!rows.length) {
-    await pg.query(`TRUNCATE TABLE ${table}`);
-    return 0;
-  }
-  const CHUNK = 500;
-  await pg.query(`TRUNCATE TABLE ${table}`);
-  let total = 0;
-  for (let i = 0; i < rows.length; i += CHUNK) {
-    const chunk = rows.slice(i, i + CHUNK);
-    const values = [];
-    const placeholders = chunk.map((row, ri) => {
-      const ph = cols.map((col, ci) => {
-        values.push(row[col] ?? null);
-        return `$${ri * cols.length + ci + 1}`;
+async function fullRefresh(pg, table, rows, cols, { force = false, minRatio = 0.5 } = {}) {
+  const CHUNK = Math.max(1, Math.floor(60000 / cols.length));
+  const client = await pg.connect();
+  try {
+    await client.query('BEGIN');
+    const before = Number((await client.query(`SELECT count(*)::int AS n FROM ${table}`)).rows[0].n);
+    if (!force && before > 100 && rows.length < before * minRatio) {
+      throw new Error(`Garde-fou volume : ${rows.length} lignes reçues contre ${before} existantes — table conservée`);
+    }
+    await client.query(`DELETE FROM ${table}`);
+    let total = 0;
+    for (let i = 0; i < rows.length; i += CHUNK) {
+      const chunk = rows.slice(i, i + CHUNK);
+      const values = [];
+      const placeholders = chunk.map((row, ri) => {
+        const ph = cols.map((col, ci) => {
+          values.push(row[col] ?? null);
+          return `$${ri * cols.length + ci + 1}`;
+        });
+        return `(${ph.join(', ')})`;
       });
-      return `(${ph.join(', ')})`;
-    });
-    const sql = `INSERT INTO ${table} (${cols.join(', ')}) VALUES ${placeholders.join(', ')}`;
-    await pg.query(sql, values);
-    total += chunk.length;
+      await client.query(`INSERT INTO ${table} (${cols.join(', ')}) VALUES ${placeholders.join(', ')}`, values);
+      total += chunk.length;
+    }
+    await client.query('COMMIT');
+    return total;
+  } catch (err) {
+    await client.query('ROLLBACK').catch(() => {});
+    throw err;
+  } finally {
+    client.release();
   }
-  return total;
 }
 
 /**
- * Lit la date du dernier sync réussi pour une table.
+ * Date à partir de laquelle relire une table en delta : dernier sync réussi
+ * moins 2 jours de recouvrement (last_sync est l'heure PG en UTC alors que
+ * SUIVIDATEMODIF est l'heure locale SQL Server ; les upserts sont idempotents).
  */
-async function getLastSync(pg, tableName) {
+async function getLastSync(pg, tableName, overlapDays = 2) {
   const res = await pg.query(
-    `SELECT last_sync FROM sync_log WHERE table_name = $1 AND status = 'ok'`,
-    [tableName]
+    `SELECT last_sync - make_interval(days => $2) AS since FROM sync_log WHERE table_name = $1 AND status = 'ok'`,
+    [tableName, overlapDays]
   );
-  return res.rows[0]?.last_sync || null;
+  return res.rows[0]?.since || null;
 }
 
 /**
- * Enregistre le résultat d'un sync dans sync_log.
+ * Enregistre le résultat d'un sync dans sync_log. Ne lève jamais (un échec de
+ * journalisation ne doit pas masquer l'erreur d'origine).
  */
 async function logSync(pg, tableName, rowsSynced, status, errorMsg = null) {
-  await pg.query(`
-    INSERT INTO sync_log (table_name, last_sync, rows_synced, status, error_msg)
-    VALUES ($1, NOW(), $2, $3, $4)
-    ON CONFLICT (table_name) DO UPDATE SET
-      last_sync   = NOW(),
-      rows_synced = $2,
-      status      = $3,
-      error_msg   = $4
-  `, [tableName, rowsSynced, status, errorMsg]);
+  try {
+    await pg.query(`
+      INSERT INTO sync_log (table_name, last_sync, rows_synced, status, error_msg)
+      VALUES ($1, NOW(), $2, $3, $4)
+      ON CONFLICT (table_name) DO UPDATE SET
+        last_sync   = NOW(),
+        rows_synced = $2,
+        status      = $3,
+        error_msg   = $4
+    `, [tableName, rowsSynced, status, errorMsg ? String(errorMsg).slice(0, 2000) : null]);
+  } catch (err) {
+    console.error(`[sync_log] impossible de journaliser ${tableName}: ${err.message}`);
+  }
 }
 
 // ── Helpers de conversion SQL Server → PostgreSQL ───────────

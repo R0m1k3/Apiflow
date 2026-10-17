@@ -12,7 +12,11 @@ const VIVANT_COLS = [
   'cotisation_logistique','fraislogistic','transit','distribution','taxe',
   'commentaire','suividatecreation',
 ];
-const RECEP_COLS = ['no_id','suividatecreation','suividatemodif'];
+const RECEP_COLS = [
+  'no_id','fouident_code','recnum','sit_cod_desti','cdefou_livraison_no_id','com_no_id',
+  'recetat','recdate','recbl','recbldate','recblinfo','suividatecreation','suividatemodif',
+];
+const num = (v) => (v == null || v === '' || !Number.isFinite(Number(v)) ? null : Number(v));
 const RECEPLIG_COLS = [
   'no_id','cdefou_reception_no_id','artfou1_no_id',
   'qtebl','qterec','qteacc','qteref','qteaff',
@@ -76,7 +80,7 @@ async function syncCommandes(force) {
       suividatecreation:       r.SUIVIDATECREATION,
     }));
 
-    const count = await fullRefresh(pg, 'cdefou_vivant', rows, VIVANT_COLS);
+    const count = await fullRefresh(pg, 'cdefou_vivant', rows, VIVANT_COLS, { force });
     await logSync(pg, 'cdefou_vivant', count, 'ok');
     console.log(`[cdefou_vivant] ${count} lignes refresh`);
   } catch (err) {
@@ -90,10 +94,22 @@ async function syncCommandes(force) {
     const where    = lastSync ? `WHERE SUIVIDATEMODIF > '${lastSync.toISOString()}'` : '';
 
     const res = await ms.request().query(
-      `SELECT NO_ID, SUIVIDATECREATION, SUIVIDATEMODIF FROM CDEFOU_RECEPTION ${where}`
+      `SELECT NO_ID, FOUIDENT_CODE, RECNUM, SIT_COD_DESTI, CDEFOU_LIVRAISON_NO_ID, COM_NO_ID,
+              RECETAT, RecDate, RECBL, RECBLDATE, RECBLINFO, SUIVIDATECREATION, SUIVIDATEMODIF
+       FROM CDEFOU_RECEPTION ${where}`
     );
     const rows = res.recordset.map(r => ({
       no_id:             r.NO_ID,
+      fouident_code:     safeStr(r.FOUIDENT_CODE)?.trim() || null,
+      recnum:            safeStr(r.RECNUM),
+      sit_cod_desti:     safeStr(r.SIT_COD_DESTI),
+      cdefou_livraison_no_id: num(r.CDEFOU_LIVRAISON_NO_ID),
+      com_no_id:         num(r.COM_NO_ID),
+      recetat:           safeStr(r.RECETAT),
+      recdate:           r.RecDate,
+      recbl:             safeStr(r.RECBL),
+      recbldate:         r.RECBLDATE,
+      recblinfo:         safeStr(r.RECBLINFO),
       suividatecreation: r.SUIVIDATECREATION,
       suividatemodif:    r.SUIVIDATEMODIF,
     }));

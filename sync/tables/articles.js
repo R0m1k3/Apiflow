@@ -5,7 +5,12 @@ const ARTICLES_COLS = [
   'no_id','codein','libelle1','libelle2','lib_ticket',
   'tax_code','ach_code','utilisable','actif','suspendu',
   'suividatecreation','suividatemodif','nom_no_id','artcentrale',
+  // ajoutées oct. 2026
+  'unite_aff','clas_code','mod_code','mar_no_id','qte_uc','qte_valo',
+  'poids_brut_uc','poids_net_uc','long_encomb','large_encomb','haut_encomb',
+  'vente_coupe','coef_achat_vente','artchamp1','artchamp2','artchamp3','artchamp4','artchamp5',
 ];
+const num = (v) => (v == null || v === '' || !Number.isFinite(Number(v)) ? null : Number(v));
 const INFOSUP_COLS = [
   'artnoid','prix_vente_mini','prix_vente_maxi','eco_ht','eco_ttc',
   'on_web','interdit_remise','nomphoto','datedebvente','datefinvente',
@@ -26,7 +31,10 @@ async function syncArticles(force) {
     const res = await ms.request().query(`
       SELECT NO_ID, CODEIN, LIBELLE1, LIBELLE2, LIB_TICKET,
              TAX_CODE, ACH_CODE, UTILISABLE, ACTIF, SUSPENDU,
-             SUIVIDATECREATION, SUIVIDATEMODIF, NOM_NO_ID, ARTCENTRALE
+             SUIVIDATECREATION, SUIVIDATEMODIF, NOM_NO_ID, ARTCENTRALE,
+             UNITE_AFF, CLAS_CODE, MOD_CODE, MAR_NO_ID, QTE_UC, QTE_VALO,
+             POIDS_BRUT_UC, POIDS_NET_UC, LONG_ENCOMB, LARGE_ENCOMB, HAUT_ENCOMB,
+             VENTE_COUPE, COEF_ACHAT_VENTE, ARTCHAMP1, ARTCHAMP2, ARTCHAMP3, ARTCHAMP4, ARTCHAMP5
       FROM ARTICLES ${where}
     `);
 
@@ -45,6 +53,24 @@ async function syncArticles(force) {
       suividatemodif:    r.SUIVIDATEMODIF,
       nom_no_id:         r.NOM_NO_ID,
       artcentrale:       safeStr(r.ARTCENTRALE),
+      unite_aff:         safeStr(r.UNITE_AFF),
+      clas_code:         safeStr(r.CLAS_CODE),
+      mod_code:          safeStr(r.MOD_CODE),
+      mar_no_id:         num(r.MAR_NO_ID),
+      qte_uc:            num(r.QTE_UC),
+      qte_valo:          num(r.QTE_VALO),
+      poids_brut_uc:     num(r.POIDS_BRUT_UC),
+      poids_net_uc:      num(r.POIDS_NET_UC),
+      long_encomb:       num(r.LONG_ENCOMB),
+      large_encomb:      num(r.LARGE_ENCOMB),
+      haut_encomb:       num(r.HAUT_ENCOMB),
+      vente_coupe:       safeStr(r.VENTE_COUPE),
+      coef_achat_vente:  num(r.COEF_ACHAT_VENTE),
+      artchamp1:         safeStr(r.ARTCHAMP1),
+      artchamp2:         safeStr(r.ARTCHAMP2),
+      artchamp3:         safeStr(r.ARTCHAMP3),
+      artchamp4:         safeStr(r.ARTCHAMP4),
+      artchamp5:         safeStr(r.ARTCHAMP5),
     }));
 
     const count = await batchUpsert(pg, 'articles', rows, ['no_id'], ARTICLES_COLS);
@@ -58,8 +84,11 @@ async function syncArticles(force) {
   // === ARTICLE_INFOSUP ===
   try {
     const lastSync = force ? null : await getLastSync(pg, 'article_infosup');
+    // Delta sur la date de modif propre à ARTICLE_INFOSUP (avant : celle d'ARTICLES,
+    // ce qui ratait les modifications faites uniquement dans infosup)
     const where    = lastSync
-      ? `WHERE ai.ARTNOID IN (SELECT NO_ID FROM ARTICLES WHERE SUIVIDATEMODIF > '${lastSync.toISOString()}')`
+      ? `WHERE ai.SUIVIDATEMODIF > '${lastSync.toISOString()}'
+            OR ai.ARTNOID IN (SELECT NO_ID FROM ARTICLES WHERE SUIVIDATEMODIF > '${lastSync.toISOString()}')`
       : '';
 
     const res = await ms.request().query(`
