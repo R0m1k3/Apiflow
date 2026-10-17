@@ -140,7 +140,7 @@ async function syncAppro(force) {
       suividatemodif:    r.SUIVIDATEMODIF,
     }));
 
-    const count = await fullRefresh(pg, 'commande_auto_qtepropo', rows, COMMANDE_AUTO_COLS);
+    const count = await fullRefresh(pg, 'commande_auto_qtepropo', rows, COMMANDE_AUTO_COLS, { force });
     await logSync(pg, 'commande_auto_qtepropo', count, 'ok');
     console.log(`[commande_auto_qtepropo] ${count} lignes`);
   } catch (err) {
@@ -183,7 +183,7 @@ async function syncAppro(force) {
     }
     const dedupRows = [...byCode.values()];
 
-    const count = await fullRefresh(pg, 'foucad', dedupRows, FOUCAD_COLS);
+    const count = await fullRefresh(pg, 'foucad', dedupRows, FOUCAD_COLS, { force });
     await logSync(pg, 'foucad', count, 'ok');
     console.log(`[foucad] ${count} lignes`);
   } catch (err) {
@@ -207,7 +207,7 @@ async function syncAppro(force) {
       suividatemodif:    r.SUIVIDATEMODIF,
     }));
 
-    const count = await fullRefresh(pg, 'fouport', rows, FOUPORT_COLS);
+    const count = await fullRefresh(pg, 'fouport', rows, FOUPORT_COLS, { force });
     await logSync(pg, 'fouport', count, 'ok');
     console.log(`[fouport] ${count} lignes`);
   } catch (err) {
@@ -233,7 +233,7 @@ async function syncAppro(force) {
       suividatemodif:    r.SUIVIDATEMODIF,
     }));
 
-    const count = await fullRefresh(pg, 'fouport2', rows, FOUPORT2_COLS);
+    const count = await fullRefresh(pg, 'fouport2', rows, FOUPORT2_COLS, { force });
     await logSync(pg, 'fouport2', count, 'ok');
     console.log(`[fouport2] ${count} lignes`);
   } catch (err) {
@@ -270,7 +270,7 @@ async function syncAppro(force) {
       date_besoin:          r.DateBesoin ?? null,
     }));
 
-    const count = await fullRefresh(pg, 'plan_reappro', rows, PLAN_REAPPRO_COLS);
+    const count = await fullRefresh(pg, 'plan_reappro', rows, PLAN_REAPPRO_COLS, { force });
     await logSync(pg, 'plan_reappro', count, 'ok');
     console.log(`[plan_reappro] ${count} lignes`);
   } catch (err) {

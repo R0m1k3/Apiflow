@@ -1,190 +1,54 @@
+/**
+ * Mouvements de stock / ventes / règlements.
+ *
+ * Avant (bug) : insert-only sur `DatMvt > MAX(datmvt)`. DatMvt n'ayant pas
+ * d'heure, une sync lancée en journée chargeait une journée partielle puis
+ * ne la complétait jamais ; mvtreg n'avait pas de clé → doublons à chaque
+ * sync forcée ; les suppressions n'étaient jamais propagées.
+ *
+ * Maintenant : fenêtre glissante de 10 jours remplacée chaque nuit, par mois,
+ * en transaction (cf. engine.js), + propagation de mvtart_delete.
+ */
+'use strict';
+const { runSpec, withTx } = require('../engine');
 const { getMssql, getPg } = require('../db');
 const { logSync } = require('../utils');
+const { MVTART, MVTREG, MVTART_MOTIF, STATOPCA, FIDELITE_JOUR } = require('./specs');
 
-const STATOPCA_COLS = ['site', 'datmvt', 'mnt', 'nbticket'];
-
-const MVTART_COLS = [
-  'no_id','artnoid','datmvt','site','libmvt','genremvt',
-  'qtemvt','valmvt','mntmvtht','mntmvtttc','margemvt',
-  'qtestock','prmp','valstock','codefou',
-];
-const MVTREG_COLS = [
-  'datmvt','codtick','codcartecli','coddev',
-  'mntreg','mntregdev','clientnom','echeance',
-  'reference','typereg','suividatecreation',
-];
-
-const CHUNK = 2000;
-
-async function insertChunk(pg, table, rows, cols, conflictTarget = null) {
-  if (!rows.length) return;
-  const values = [];
-  const placeholders = rows.map((row, ri) => {
-    const ph = cols.map((col, ci) => {
-      values.push(row[col] ?? null);
-      return `$${ri * cols.length + ci + 1}`;
-    });
-    return `(${ph.join(', ')})`;
-  });
-  const conflict = conflictTarget ? `ON CONFLICT (${conflictTarget}) DO NOTHING` : '';
-  await pg.query(
-    `INSERT INTO ${table} (${cols.join(', ')}) VALUES ${placeholders.join(', ')} ${conflict}`,
-    values
-  );
+/** Supprime côté PG les mouvements supprimés côté SQL Server (table mvtart_delete) */
+async function propagateDeletes() {
+  const pg = getPg();
+  try {
+    const ms = await getMssql();
+    const { recordset } = await ms.request().query('SELECT NO_ID FROM mvtart_delete WITH (NOLOCK)');
+    const ids = recordset.map((r) => Number(r.NO_ID)).filter(Number.isFinite);
+    let deleted = 0;
+    for (let i = 0; i < ids.length; i += 20000) {
+      const part = ids.slice(i, i + 20000);
+      deleted += await withTx(async (client) => {
+        const a = await client.query('DELETE FROM mvtart WHERE no_id = ANY($1::bigint[])', [part]);
+        await client.query('DELETE FROM mvtart_motif WHERE mvtart_no_id = ANY($1::bigint[])', [part]);
+        return a.rowCount;
+      });
+    }
+    await logSync(pg, 'mvtart_delete', deleted, 'ok');
+    if (deleted) console.log(`[mvtart_delete] ${deleted} mouvements supprimés propagés`);
+  } catch (err) {
+    console.error(`[mvtart_delete] ERREUR: ${err.message}`);
+    await logSync(pg, 'mvtart_delete', 0, 'error', err.message);
+  }
 }
 
 async function syncMouvements(force) {
-  const ms = await getMssql();
-  const pg  = getPg();
-
-  // === MvtArt (insert-only par date croissante) ===
-  try {
-    // Date pivot : max existant en pg, ou 2 ans en arrière pour sync initiale
-    const maxRes = await pg.query(`SELECT MAX(datmvt) AS last FROM mvtart`);
-    let lastDate  = maxRes.rows[0]?.last;
-    if (!lastDate || force) {
-      const twoYearsAgo = new Date();
-      twoYearsAgo.setFullYear(twoYearsAgo.getFullYear() - 2);
-      lastDate = twoYearsAgo;
-    }
-
-    const res = await ms.request()
-      .input('lastDate', lastDate)
-      .query(`
-        SELECT NO_ID, ArtNoId, DatMvt, Site, LibMvt, GenreMvt,
-               QteMvt, ValMvt, MntMvtHt, MntMvtTTC, MargeMvt,
-               QteStock, Prmp, ValStock, CODEFOU
-        FROM MvtArt
-        WHERE DatMvt > @lastDate
-        ORDER BY DatMvt
-      `);
-
-    const allRows = res.recordset.map(r => ({
-      no_id:      r.NO_ID,
-      artnoid:    r.ArtNoId,
-      datmvt:     r.DatMvt,
-      site:       r.Site,
-      libmvt:     r.LibMvt,
-      genremvt:   r.GenreMvt,
-      qtemvt:     r.QteMvt,
-      valmvt:     r.ValMvt,
-      mntmvtht:   r.MntMvtHt,
-      mntmvtttc:  r.MntMvtTTC,
-      margemvt:   r.MargeMvt,
-      qtestock:   r.QteStock,
-      prmp:       r.Prmp,
-      valstock:   r.ValStock,
-      codefou:    r.CODEFOU,
-    }));
-
-    let inserted = 0;
-    for (let i = 0; i < allRows.length; i += CHUNK) {
-      await insertChunk(pg, 'mvtart', allRows.slice(i, i + CHUNK), MVTART_COLS, 'no_id');
-      inserted += Math.min(CHUNK, allRows.length - i);
-    }
-
-    await logSync(pg, 'mvtart', inserted, 'ok');
-    console.log(`[mvtart] ${inserted} nouvelles lignes`);
-  } catch (err) {
-    await logSync(pg, 'mvtart', 0, 'error', err.message);
-    console.error(`[mvtart] ERREUR: ${err.message}`);
-  }
-
-  // === MvtReg (insert-only par date) ===
-  try {
-    const maxRes = await pg.query(`SELECT MAX(datmvt) AS last FROM mvtreg`);
-    let lastDate  = maxRes.rows[0]?.last;
-    if (!lastDate || force) {
-      const twoYearsAgo = new Date();
-      twoYearsAgo.setFullYear(twoYearsAgo.getFullYear() - 2);
-      lastDate = twoYearsAgo;
-    }
-
-    const res = await ms.request()
-      .input('lastDate', lastDate)
-      .query(`
-        SELECT DatMvt, CodTick, CodCarteCli, CodDev,
-               MntReg, MntRegDev, ClientNom, Echeance,
-               REFERENCE, TYPEREG, SuiviDateCreation
-        FROM MvtReg
-        WHERE DatMvt > @lastDate
-        ORDER BY DatMvt
-      `);
-
-    const allRows = res.recordset.map(r => ({
-      datmvt:            r.DatMvt,
-      codtick:           r.CodTick,
-      codcartecli:       r.CodCarteCli,
-      coddev:            r.CodDev,
-      mntreg:            r.MntReg,
-      mntregdev:         r.MntRegDev,
-      clientnom:         r.ClientNom,
-      echeance:          r.Echeance,
-      reference:         r.REFERENCE,
-      typereg:           r.TYPEREG,
-      suividatecreation: r.SuiviDateCreation,
-    }));
-
-    let inserted = 0;
-    for (let i = 0; i < allRows.length; i += CHUNK) {
-      await insertChunk(pg, 'mvtreg', allRows.slice(i, i + CHUNK), MVTREG_COLS);
-      inserted += Math.min(CHUNK, allRows.length - i);
-    }
-
-    await logSync(pg, 'mvtreg', inserted, 'ok');
-    console.log(`[mvtreg] ${inserted} nouvelles lignes`);
-  } catch (err) {
-    await logSync(pg, 'mvtreg', 0, 'error', err.message);
-    console.error(`[mvtreg] ERREUR: ${err.message}`);
-  }
+  await runSpec(MVTART, { force });
+  await runSpec(MVTART_MOTIF, { force });
+  await propagateDeletes();
+  await runSpec(MVTREG, { force });
+  await runSpec(FIDELITE_JOUR, { force });
 }
 
-// === StatOpCAJour (upsert par site+date) ===
 async function syncStatOpCA(force) {
-  const ms = await getMssql();
-  const pg  = getPg();
-
-  try {
-    const maxRes = await pg.query(`SELECT MAX(datmvt) AS last FROM statopca`);
-    let lastDate  = maxRes.rows[0]?.last;
-    if (!lastDate || force) {
-      const twoYearsAgo = new Date();
-      twoYearsAgo.setFullYear(twoYearsAgo.getFullYear() - 2);
-      lastDate = twoYearsAgo;
-    }
-
-    const res = await ms.request()
-      .input('lastDate', lastDate)
-      .query(`SELECT SITE, DatMvt, mnt, nbTicket FROM StatOpCAJour WHERE DatMvt > @lastDate ORDER BY DatMvt`);
-
-    const rows = res.recordset.map(r => ({
-      site:     r.SITE,
-      datmvt:   r.DatMvt,
-      mnt:      r.mnt,
-      nbticket: r.nbTicket,
-    }));
-
-    for (let i = 0; i < rows.length; i += CHUNK) {
-      const chunk = rows.slice(i, i + CHUNK);
-      const values = [];
-      const placeholders = chunk.map((row, ri) => {
-        STATOPCA_COLS.forEach(col => values.push(row[col] ?? null));
-        const ph = STATOPCA_COLS.map((_, ci) => `$${ri * STATOPCA_COLS.length + ci + 1}`);
-        return `(${ph.join(', ')})`;
-      });
-      await pg.query(
-        `INSERT INTO statopca (${STATOPCA_COLS.join(', ')}) VALUES ${placeholders.join(', ')}
-         ON CONFLICT (site, datmvt) DO UPDATE SET mnt=EXCLUDED.mnt, nbticket=EXCLUDED.nbticket`,
-        values
-      );
-    }
-
-    await logSync(pg, 'statopca', rows.length, 'ok');
-    console.log(`[statopca] ${rows.length} lignes`);
-  } catch (err) {
-    await logSync(pg, 'statopca', 0, 'error', err.message);
-    console.error(`[statopca] ERREUR: ${err.message}`);
-  }
+  await runSpec(STATOPCA, { force });
 }
 
 module.exports = { syncMouvements, syncStatOpCA };

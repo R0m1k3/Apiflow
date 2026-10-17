@@ -1,17 +1,32 @@
 # Copier en frpc.toml et remplir les valeurs
 # frpc.toml est exclu du git (contient le token secret)
+# Version : snowdreamtech/frpc:0.71.0-alpine (doit correspondre à frps côté Hostinger)
 
 serverAddr = "api.ffnancy.fr"
 serverPort = 7000
 
+# Token long et aléatoire, identique à frps.toml : openssl rand -hex 32
 auth.method = "token"
 auth.token  = "CHANGE_ME_FRP_SECRET_TOKEN"
+# Exigé par frps.toml (gateway) : le token signe aussi heartbeats et connexions de travail
+auth.additionalScopes = ["HeartBeats", "NewWorkConns"]
+
+# frps impose TLS (transport.tls.force = true)
+transport.tls.enable = true
 
 log.level = "info"
 
 [[proxies]]
-name      = "foirfouille-api"
-type      = "tcp"
-localIP   = "api"
-localPort = 3000
+name       = "foirfouille-api"
+type       = "tcp"
+localIP    = "api"
+localPort  = 3000
 remotePort = 13000
+
+# PostgreSQL Debian → lu par ff_sync_hostinger (réseau Docker nginx_default côté VPS uniquement)
+[[proxies]]
+name       = "foirfouille-postgres"
+type       = "tcp"
+localIP    = "postgres"
+localPort  = 5432
+remotePort = 15432

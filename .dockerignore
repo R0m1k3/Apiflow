@@ -1,0 +1,12 @@
+# Ne jamais embarquer secrets ni fichiers inutiles dans l image API
+.git
+node_modules
+sync
+postgres
+scripts
+docs
+.env
+.env.*
+!.env.docker.example
+frpc.toml
+*.log

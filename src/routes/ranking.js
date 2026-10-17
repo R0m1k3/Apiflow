@@ -1,15 +1,27 @@
 const express = require('express');
 const router = express.Router();
 const { getPool } = require('../config/database');
+const { parseText, parseId, parsePositiveInt, likeContains } = require('../utils/params');
+const { SqlParams, where } = require('../utils/sql');
 
 // GET /api/ranking?gencod=&codein=&site=&foucentrale=&limit=
 router.get('/', async (req, res) => {
-  try {
-    const pool = getPool();
-    const { gencod = '', codein = '', site = '', foucentrale = '', limit = 50 } = req.query;
-    const limitNum = Math.max(1, Math.min(parseInt(limit) || 50, 500));
+  const q = req.query;
+  const gencod      = parseText(q.gencod, 'gencod', { max: 20 });
+  const codein      = parseText(q.codein, 'codein', { max: 50 });
+  const site        = parseText(q.site, 'site', { max: 20 });
+  const foucentrale = parseText(q.foucentrale, 'foucentrale', { max: 50 });
+  const limit = parsePositiveInt(q.limit, 'limit', { def: 50, min: 1, max: 500, clamp: true });
 
-    const result = await pool.query(`
+  const p = new SqlParams();
+  const conds = [];
+  if (gencod) conds.push(`r.gencod = ${p.add(gencod)}`);
+  if (codein) conds.push(`a.codein = ${p.add(codein)}`);
+  // site et foucentrale : filtres partiels (documentés)
+  if (site) conds.push(`r.site LIKE ${p.add(likeContains(site))}`);
+  if (foucentrale) conds.push(`r.foucentrale LIKE ${p.add(likeContains(foucentrale))}`);
+
+  const result = await getPool().query(`
       SELECT
         r.gencod, r.site, r.libelle,
         r.foucentrale, r.nomfoucentrale,
@@ -20,29 +32,27 @@ router.get('/', async (req, res) => {
         r.date_maj, r.date_calcul_mag,
         a.no_id AS art_no_id, a.codein
       FROM ranking r
-      LEFT JOIN art_gtin g ON g.gtin = r.gencod
+      -- Un GTIN peut être rattaché à plusieurs articles : un seul retenu (pas de doublon)
+      LEFT JOIN LATERAL (
+        SELECT g.idarticle FROM art_gtin g
+        WHERE g.gtin = r.gencod
+        ORDER BY g.preferentiel DESC NULLS LAST, g.idarticle
+        LIMIT 1
+      ) g ON true
       LEFT JOIN articles a ON a.no_id = g.idarticle
-      WHERE ($1 = '' OR r.gencod = $1)
-        AND ($2 = '' OR a.codein = $2)
-        AND ($3 = '' OR r.site LIKE $3)
-        AND ($4 = '' OR r.foucentrale LIKE $4)
-      ORDER BY r.ranking_ca ASC NULLS LAST
-      LIMIT $5
-    `, [gencod, codein, `%${site}%`, `%${foucentrale}%`, limitNum]);
+      ${where(conds)}
+      ORDER BY r.ranking_ca ASC NULLS LAST, r.gencod, r.site
+      LIMIT ${p.add(limit)}
+    `, p.values);
 
-    res.json({ count: result.rows.length, ranking: result.rows });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
+  res.json({ count: result.rows.length, ranking: result.rows });
 });
 
 // GET /api/ranking/article/:id - Ranking pour un article (par no_id)
 router.get('/article/:id', async (req, res) => {
-  try {
-    const pool = getPool();
-    const artNoId = req.params.id;
+  const artNoId = parseId(req.params.id);
 
-    const result = await pool.query(`
+  const result = await getPool().query(`
       SELECT
         r.gencod, r.site, r.libelle,
         r.foucentrale, r.nomfoucentrale,
@@ -57,10 +67,7 @@ router.get('/article/:id', async (req, res) => {
       ORDER BY r.site
     `, [artNoId]);
 
-    res.json({ artNoId, ranking: result.rows });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
+  res.json({ artNoId, ranking: result.rows });
 });
 
 module.exports = router;

@@ -88,7 +88,7 @@ async function syncStock(force) {
       codefou:                   safeStr(r.CODEFOU),
     }));
 
-    const count = await fullRefresh(pg, 'cube_stock', rows, STOCK_COLS);
+    const count = await fullRefresh(pg, 'cube_stock', rows, STOCK_COLS, { force });
     await logSync(pg, 'cube_stock', count, 'ok');
     console.log(`[cube_stock] ${count} lignes refresh`);
   } catch (err) {
@@ -130,7 +130,7 @@ async function syncStock(force) {
       console.log(`[cube_pa] ${dupIds.length} artnoid dédupliqués`);
     }
 
-    const count = await fullRefresh(pg, 'cube_pa', rows, PA_COLS);
+    const count = await fullRefresh(pg, 'cube_pa', rows, PA_COLS, { force });
     await logSync(pg, 'cube_pa', count, 'ok');
     console.log(`[cube_pa] ${count} lignes refresh`);
   } catch (err) {
