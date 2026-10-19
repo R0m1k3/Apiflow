@@ -89,6 +89,18 @@ async function getLastSync(pg, tableName, overlapDays = 2) {
 }
 
 /**
+ * Filtre delta SQL Server : lignes modifiées OU créées depuis `since`.
+ * Une ligne jamais modifiée a un SUIVIDATEMODIF vide : filtrer sur la seule
+ * date de modif ratait donc toutes les créations.
+ * @param {Date|null} since - null → pas de filtre (sync complète)
+ */
+function deltaWhere(since) {
+  if (!since) return '';
+  const iso = since.toISOString();
+  return `WHERE (SUIVIDATEMODIF > '${iso}' OR SUIVIDATECREATION > '${iso}')`;
+}
+
+/**
  * Enregistre le résultat d'un sync dans sync_log. Ne lève jamais (un échec de
  * journalisation ne doit pas masquer l'erreur d'origine).
  */
@@ -154,4 +166,4 @@ function safeDecimal(v) {
   return m ? parseFloat(m[1]) : null;
 }
 
-module.exports = { batchUpsert, fullRefresh, getLastSync, logSync, safeStr, safeNum, safeInt, safeBit, safeDecimal };
+module.exports = { batchUpsert, fullRefresh, getLastSync, deltaWhere, logSync, safeStr, safeNum, safeInt, safeBit, safeDecimal };

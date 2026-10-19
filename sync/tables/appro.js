@@ -1,5 +1,5 @@
 const { getMssql, getPg } = require('../db');
-const { batchUpsert, fullRefresh, getLastSync, logSync, safeStr, safeDecimal } = require('../utils');
+const { batchUpsert, fullRefresh, getLastSync, deltaWhere, logSync, safeStr, safeDecimal } = require('../utils');
 
 const COMMANDE_FOU_COLS = [
   'no_id','cdenum','sit_cod_emet','sit_cod_desti','fouident_code',
@@ -43,7 +43,7 @@ async function syncAppro(force) {
   try {
     const ms = await getMssql();
     const lastSync = force ? null : await getLastSync(pg, 'commande_fou');
-    const where    = lastSync ? `WHERE SUIVIDATEMODIF > '${lastSync.toISOString()}'` : '';
+    const where    = deltaWhere(lastSync);
 
     const res = await ms.request().query(`
       SELECT NO_ID, CDENUM, SIT_COD_EMET, SIT_COD_DESTI, FOUIDENT_CODE,
@@ -82,7 +82,7 @@ async function syncAppro(force) {
   try {
     const ms = await getMssql();
     const lastSync = force ? null : await getLastSync(pg, 'cdefou_ligne');
-    const where    = lastSync ? `WHERE SUIVIDATEMODIF > '${lastSync.toISOString()}'` : '';
+    const where    = deltaWhere(lastSync);
 
     const res = await ms.request().query(`
       SELECT NO_ID, ARTFOU1_NO_ID, COMMANDE_FOU_NO_ID, CDELIG, CDELIGTARD, CDELIGTOT,

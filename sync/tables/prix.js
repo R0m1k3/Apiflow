@@ -5,12 +5,14 @@
  *   "[01/01/1901,4.99:26/09/2022,7.99:08/01/2025,9.99]"
  * → une ligne par (article, site, tarif, date d'effet).
  *
- * Delta par SUIVIDATEMODIF (−2 jours de recouvrement) ; rechargement complet
+ * Delta par SUIVIDATEMODIF, et SUIVIDATECREATION quand la table source l'a
+ * (une ligne jamais modifiée a un SUIVIDATEMODIF vide) — −2 jours de
+ * recouvrement ; rechargement complet
  * à la première sync, en mode force, ou si le dernier complet a plus de 7 jours
  * (rattrape les lignes supprimées côté source).
  */
 'use strict';
-const { getPg } = require('../db');
+const { getMssql, getPg } = require('../db');
 const { getLastSync, logSync } = require('../utils');
 const { runSpec } = require('../engine');
 
@@ -38,9 +40,20 @@ function expandRow(r, site) {
 }
 
 const SOURCES = [
-  { sql: 'SELECT ARTICLE_NO_ID, TARIF_CLIENT_NO_ID, SITE_CODE, LTC_MAG_PRIXVENTE AS PRIX FROM LIG_TC_MAGASIN WITH (NOLOCK)', site: (r) => String(r.SITE_CODE || '').trim() || '???' },
-  { sql: 'SELECT ARTICLE_NO_ID, TARIF_CLIENT_NO_ID, LTC_CEN_PRIXVENTE AS PRIX FROM LIG_TC_CENTRALE WITH (NOLOCK)', site: () => '000' },
+  { table: 'LIG_TC_MAGASIN', sql: 'SELECT ARTICLE_NO_ID, TARIF_CLIENT_NO_ID, SITE_CODE, LTC_MAG_PRIXVENTE AS PRIX FROM LIG_TC_MAGASIN WITH (NOLOCK)', site: (r) => String(r.SITE_CODE || '').trim() || '???' },
+  { table: 'LIG_TC_CENTRALE', sql: 'SELECT ARTICLE_NO_ID, TARIF_CLIENT_NO_ID, LTC_CEN_PRIXVENTE AS PRIX FROM LIG_TC_CENTRALE WITH (NOLOCK)', site: () => '000' },
 ];
+
+/** Filtre delta : SUIVIDATECREATION n'est utilisée que si la table source la possède */
+async function deltaCond(table) {
+  const ms  = await getMssql();
+  const res = await ms.request().input('t', table).query(
+    `SELECT 1 AS ok FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = @t AND COLUMN_NAME = 'SUIVIDATECREATION'`
+  );
+  return res.recordset.length
+    ? '(SUIVIDATEMODIF >= @since OR SUIVIDATECREATION >= @since)'
+    : 'SUIVIDATEMODIF >= @since';
+}
 
 const PRIX_SPEC = {
   name: 'prix_vente_historique',
@@ -70,7 +83,7 @@ const PRIX_SPEC = {
 
     // Delta : on remplace l'historique complet des lignes modifiées
     for (const src of SOURCES) {
-      await streamQuery(`${src.sql} WHERE SUIVIDATEMODIF >= @since`, { since: lastSync }, async (rows) => {
+      await streamQuery(`${src.sql} WHERE ${await deltaCond(src.table)}`, { since: lastSync }, async (rows) => {
         await withTx(async (client) => {
           const keys = rows.map((r) => [Number(r.ARTICLE_NO_ID), src.site(r), Number(r.TARIF_CLIENT_NO_ID)]);
           await client.query(

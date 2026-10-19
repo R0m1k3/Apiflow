@@ -1,5 +1,5 @@
 const { getMssql, getPg } = require('../db');
-const { batchUpsert, fullRefresh, getLastSync, logSync, safeDecimal } = require('../utils');
+const { batchUpsert, fullRefresh, getLastSync, deltaWhere, logSync, safeDecimal } = require('../utils');
 
 const ARTFOU1_COLS = [
   'no_id','art_no_id','code','reference','ean13','itf',
@@ -14,10 +14,10 @@ async function syncFournisseurs(force) {
   const ms = await getMssql();
   const pg  = getPg();
 
-  // === ARTFOU1 (delta par SUIVIDATEMODIF) ===
+  // === ARTFOU1 (delta par SUIVIDATEMODIF / SUIVIDATECREATION) ===
   try {
     const lastSync = force ? null : await getLastSync(pg, 'artfou1');
-    const where    = lastSync ? `WHERE SUIVIDATEMODIF > '${lastSync.toISOString()}'` : '';
+    const where    = deltaWhere(lastSync);
 
     const res = await ms.request().query(`
       SELECT NO_ID, ART_NO_ID, CODE, REFERENCE, EAN13, ITF,
