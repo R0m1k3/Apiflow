@@ -28,7 +28,7 @@ router.get('/', async (req, res) => {
         MAX(fa.email) AS email,
         COUNT(DISTINCT f.art_no_id) AS nb_articles,
         MIN(f.suividatecreation) AS premiere_entree,
-        MAX(f.suividatemodif) AS derniere_modif,
+        MAX(COALESCE(f.suividatemodif, f.suividatecreation)) AS derniere_modif,
         SUM(CASE WHEN f.suspendu IS NULL THEN 1 ELSE 0 END) AS nb_actifs,
         SUM(CASE WHEN f.suspendu IS NOT NULL THEN 1 ELSE 0 END) AS nb_suspendus,
         COUNT(*) OVER () AS total_count

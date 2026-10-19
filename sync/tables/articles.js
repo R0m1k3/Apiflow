@@ -1,5 +1,5 @@
 const { getMssql, getPg } = require('../db');
-const { batchUpsert, getLastSync, logSync, safeStr, safeBit } = require('../utils');
+const { batchUpsert, getLastSync, deltaWhere, logSync, safeStr, safeBit } = require('../utils');
 
 const ARTICLES_COLS = [
   'no_id','codein','libelle1','libelle2','lib_ticket',
@@ -26,7 +26,7 @@ async function syncArticles(force) {
   // === ARTICLES ===
   try {
     const lastSync = force ? null : await getLastSync(pg, 'articles');
-    const where    = lastSync ? `WHERE SUIVIDATEMODIF > '${lastSync.toISOString()}'` : '';
+    const where    = deltaWhere(lastSync);
 
     const res = await ms.request().query(`
       SELECT NO_ID, CODEIN, LIBELLE1, LIBELLE2, LIB_TICKET,
@@ -88,7 +88,7 @@ async function syncArticles(force) {
     // ce qui ratait les modifications faites uniquement dans infosup)
     const where    = lastSync
       ? `WHERE ai.SUIVIDATEMODIF > '${lastSync.toISOString()}'
-            OR ai.ARTNOID IN (SELECT NO_ID FROM ARTICLES WHERE SUIVIDATEMODIF > '${lastSync.toISOString()}')`
+            OR ai.ARTNOID IN (SELECT NO_ID FROM ARTICLES ${deltaWhere(lastSync)})`
       : '';
 
     const res = await ms.request().query(`

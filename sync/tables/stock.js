@@ -27,13 +27,16 @@ function lastPriceChange(s) {
 }
 
 // Pour chaque artnoid en doublon, retrouve le prix dont le changement est le plus
-// récent. Égalité de date de prix → on départage sur SUIVIDATEMODIF de la ligne.
+// récent. Égalité de date de prix → on départage sur SUIVIDATEMODIF de la ligne
+// (à défaut, date de création de la ligne ARTFOU1 : une ligne jamais modifiée
+// n'a pas de SUIVIDATEMODIF).
 async function resolveDuplicatePa(ms, artnoids) {
   const ids = artnoids.map(Number).filter(Number.isFinite);
   if (!ids.length) return new Map();
 
   const res = await ms.request().query(`
-    SELECT f1.ART_NO_ID, f2.PRIXACHAT, f2.SUIVIDATEMODIF
+    SELECT f1.ART_NO_ID, f2.PRIXACHAT,
+           COALESCE(f2.SUIVIDATEMODIF, f1.SUIVIDATEMODIF, f1.SUIVIDATECREATION) AS SUIVIDATEMODIF
     FROM ARTFOU1 f1
     JOIN ARTFOU2 f2 ON f2.IDARTFOU1 = f1.NO_ID
     WHERE f1.ART_NO_ID IN (${ids.join(',')})
