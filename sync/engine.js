@@ -8,9 +8,9 @@
  *             Garde-fou de volume : si la source renvoie moins de 50 % des
  *             lignes existantes, ROLLBACK (sauf force).
  *  - window : remplacement par tranches mensuelles sur une colonne date.
- *             Nuit normale : on recharge les N derniers jours (corrections,
- *             lignes saisies en retard, suppressions dans la fenêtre).
- *             Initialisation / force / backfill : X mois en arrière.
+ *             Par défaut (SYNC_FULL_RELOAD) : chaque nuit, tout l'historique
+ *             (initialMonths) est rechargé mois par mois.
+ *             SYNC_FULL_RELOAD=false : seuls les N derniers jours le sont.
  *  - custom : fonction dédiée (spec.run).
  *
  * Une spec décrit : name, table, mode, source (SQL), cols [[pg, src, conv]],
@@ -19,7 +19,7 @@
  */
 'use strict';
 const { getMssql, getPg } = require('./db');
-const { logSync } = require('./utils');
+const { logSync, FULL_RELOAD } = require('./utils');
 
 const MAX_PARAMS   = 60000;   // limite PG = 65535 paramètres par requête
 const STREAM_BATCH = 5000;
@@ -267,7 +267,9 @@ async function runWindow(spec, { force }) {
   }
 
   let from;
-  if (force || !mx || backfill) {
+  if (force || FULL_RELOAD || !mx || backfill) {
+    // tout l'historique (initialMonths), mois par mois : modifications et
+    // suppressions anciennes côté source propagées
     from = utcDate(now.getUTCFullYear(), now.getUTCMonth() - (spec.initialMonths ?? 24), 1);
   } else {
     // fenêtre glissante à partir du max connu (rattrape les lignes en retard)

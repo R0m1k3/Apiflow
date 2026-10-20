@@ -68,6 +68,8 @@ services:
       PG_PASSWORD: ${PG_PASSWORD}
       SCHEMA_DIR:  /app/schema
       SYNC_CRON:          ${SYNC_CRON:-45 6 * * *}
+      # true (défaut) : toutes les tables rechargées en entier chaque nuit ; false : delta
+      SYNC_FULL_RELOAD:   ${SYNC_FULL_RELOAD:-true}
       DASHBOARD_USER:     ${DASHBOARD_USER:-}
       DASHBOARD_PASSWORD: ${DASHBOARD_PASSWORD:-}
       ALERT_WEBHOOK_URL:  ${ALERT_WEBHOOK_URL:-}

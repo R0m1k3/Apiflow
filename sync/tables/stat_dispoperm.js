@@ -1,5 +1,5 @@
 const { getMssql, getPg } = require('../db');
-const { batchUpsert, logSync } = require('../utils');
+const { mirrorRows, logSync } = require('../utils');
 
 const COLS = ['codesite','code_art','recommand','statut','qtemoyer','qtemoyes','camoyes','nbreclient'];
 
@@ -25,9 +25,9 @@ async function syncStatDispoperm(force) {
       nbreclient: r.NbreClient ?? null,
     }));
 
-    const count = await batchUpsert(pg, 'stat_dispoperm', rows, ['codesite','code_art'], COLS);
+    const count = await mirrorRows(pg, 'stat_dispoperm', rows, ['codesite','code_art'], COLS, { force });
     await logSync(pg, 'stat_dispoperm', count, 'ok');
-    console.log(`[stat_dispoperm] ${count} lignes upsert`);
+    console.log(`[stat_dispoperm] ${count} lignes`);
   } catch (err) {
     await logSync(pg, 'stat_dispoperm', 0, 'error', err.message);
     console.error(`[stat_dispoperm] ERREUR: ${err.message}`);

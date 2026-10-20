@@ -1,5 +1,5 @@
 const { getMssql, getPg } = require('../db');
-const { batchUpsert, logSync, safeStr, safeNum, safeDecimal } = require('../utils');
+const { mirrorRows, logSync, safeStr, safeNum, safeDecimal } = require('../utils');
 
 const COLS = [
   'gencod', 'site', 'libelle', 'foucentrale', 'nomfoucentrale',
@@ -51,9 +51,9 @@ async function syncRanking(force) {
     for (const r of rows) seen.set(`${r.gencod}|${r.site}`, r);
     const deduped = Array.from(seen.values());
 
-    const count = await batchUpsert(pg, 'ranking', deduped, ['gencod', 'site'], COLS);
+    const count = await mirrorRows(pg, 'ranking', deduped, ['gencod', 'site'], COLS, { force });
     await logSync(pg, 'ranking', count, 'ok');
-    console.log(`[ranking] ${count} lignes upsert`);
+    console.log(`[ranking] ${count} lignes`);
   } catch (err) {
     await logSync(pg, 'ranking', 0, 'error', err.message);
     console.error(`[ranking] ERREUR: ${err.message}`);

@@ -1,5 +1,5 @@
 const { getMssql, getPg } = require('../db');
-const { batchUpsert, getLastSync, logSync, safeStr, safeBit } = require('../utils');
+const { mirrorRows, getLastSync, logSync, safeStr, safeBit } = require('../utils');
 
 const ARTICLES_COLS = [
   'no_id','codein','libelle1','libelle2','lib_ticket',
@@ -73,9 +73,9 @@ async function syncArticles(force) {
       artchamp5:         safeStr(r.ARTCHAMP5),
     }));
 
-    const count = await batchUpsert(pg, 'articles', rows, ['no_id'], ARTICLES_COLS);
+    const count = await mirrorRows(pg, 'articles', rows, ['no_id'], ARTICLES_COLS, { force, delta: !!lastSync });
     await logSync(pg, 'articles', count, 'ok');
-    console.log(`[articles] ${count} lignes upsert`);
+    console.log(`[articles] ${count} lignes`);
   } catch (err) {
     await logSync(pg, 'articles', 0, 'error', err.message);
     console.error(`[articles] ERREUR: ${err.message}`);
@@ -118,9 +118,9 @@ async function syncArticles(force) {
       distribution:      r.DISTRIBUTION,
     }));
 
-    const count = await batchUpsert(pg, 'article_infosup', rows, ['artnoid'], INFOSUP_COLS);
+    const count = await mirrorRows(pg, 'article_infosup', rows, ['artnoid'], INFOSUP_COLS, { force, delta: !!lastSync });
     await logSync(pg, 'article_infosup', count, 'ok');
-    console.log(`[article_infosup] ${count} lignes upsert`);
+    console.log(`[article_infosup] ${count} lignes`);
   } catch (err) {
     await logSync(pg, 'article_infosup', 0, 'error', err.message);
     console.error(`[article_infosup] ERREUR: ${err.message}`);
@@ -136,9 +136,9 @@ async function syncArticles(force) {
       gtin:         safeStr(r.GTIN),
       preferentiel: safeBit(r.PREFERENTIEL),
     }));
-    const count = await batchUpsert(pg, 'art_gtin', rows, ['idarticle','gtin'], GTIN_COLS);
+    const count = await mirrorRows(pg, 'art_gtin', rows, ['idarticle','gtin'], GTIN_COLS, { force });
     await logSync(pg, 'art_gtin', count, 'ok');
-    console.log(`[art_gtin] ${count} lignes upsert`);
+    console.log(`[art_gtin] ${count} lignes`);
   } catch (err) {
     await logSync(pg, 'art_gtin', 0, 'error', err.message);
     console.error(`[art_gtin] ERREUR: ${err.message}`);

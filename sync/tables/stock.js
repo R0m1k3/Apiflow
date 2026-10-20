@@ -1,5 +1,5 @@
 const { getMssql, getPg } = require('../db');
-const { fullRefresh, batchUpsert, logSync, safeNum, safeInt, safeStr } = require('../utils');
+const { fullRefresh, mirrorRows, logSync, safeNum, safeInt, safeStr } = require('../utils');
 
 const STOCK_COLS = [
   'artnoid','site','qte','prmp','valstock','pv',
@@ -144,9 +144,9 @@ async function syncStock(force) {
     const rows = res.recordset.map(r => ({
       artnoid: r.ArtNoId, site: r.Site, pv: r.PV,
     }));
-    const count = await batchUpsert(pg, 'cube_pv', rows, ['artnoid','site'], PV_COLS);
+    const count = await mirrorRows(pg, 'cube_pv', rows, ['artnoid','site'], PV_COLS, { force });
     await logSync(pg, 'cube_pv', count, 'ok');
-    console.log(`[cube_pv] ${count} lignes upsert`);
+    console.log(`[cube_pv] ${count} lignes`);
   } catch (err) {
     await logSync(pg, 'cube_pv', 0, 'error', err.message);
     console.error(`[cube_pv] ERREUR: ${err.message}`);

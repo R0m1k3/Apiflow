@@ -68,7 +68,7 @@ Au démarrage de chaque sync, le schéma est appliqué automatiquement (`postgre
 - la sync détecte que les nouvelles colonnes de `mvtart` sont vides et **recharge 24 mois de mouvements, mois par mois** ;
 - `prix_vente_historique` est chargé en entier (environ 1,5 M de lignes source).
 
-Ce premier passage est long (de quelques dizaines de minutes à plus d'une heure). Il vaut mieux le lancer **hors des heures d'ouverture**, depuis le dashboard (`http://<debian>:3001`, bouton « Lancer sync ») ou en attendant le cron de 06:45. Les passages suivants sont incrémentaux : fenêtre glissante de 10 jours pour les mouvements.
+Ce premier passage est long (de quelques dizaines de minutes à plus d'une heure). Il vaut mieux le lancer **hors des heures d'ouverture**, depuis le dashboard (`http://<debian>:3001`, bouton « Lancer sync ») ou en attendant le cron de 06:45. Par défaut (`SYNC_FULL_RELOAD=true`), **chaque nuit est un rechargement complet** : toutes les tables sont relues en entier depuis SQL Server et remplacées (DELETE + INSERT en transaction, l'API voit l'ancienne version jusqu'au COMMIT), les mouvements sur tout leur historique (24 mois) mois par mois. Les modifications et les suppressions côté source sont donc toujours reportées, puis recopiées vers Hostinger (la gateway compare chaque mois et recharge ceux qui diffèrent). Chaque nuit dure donc à peu près autant que ce premier passage. `SYNC_FULL_RELOAD=false` remet l'ancien mode delta (SUIVIDATEMODIF + fenêtre de 10 jours pour les mouvements), plus rapide mais qui manque les modifications non datées et les suppressions.
 
 Pour vérifier : le dashboard affiche une ligne par table. `_run` doit valoir `ok` et `_schema` doit indiquer `ok`.
 

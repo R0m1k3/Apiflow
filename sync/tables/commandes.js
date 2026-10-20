@@ -1,5 +1,5 @@
 const { getMssql, getPg } = require('../db');
-const { fullRefresh, batchUpsert, getLastSync, logSync, safeBit, safeStr } = require('../utils');
+const { fullRefresh, mirrorRows, getLastSync, logSync, safeBit, safeStr } = require('../utils');
 
 const VIVANT_COLS = [
   'cdefou_ligne_com_no_id','artfou1_no_id','articles_codein','articles_libelle1',
@@ -113,9 +113,9 @@ async function syncCommandes(force) {
       suividatecreation: r.SUIVIDATECREATION,
       suividatemodif:    r.SUIVIDATEMODIF,
     }));
-    const count = await batchUpsert(pg, 'cdefou_reception', rows, ['no_id'], RECEP_COLS);
+    const count = await mirrorRows(pg, 'cdefou_reception', rows, ['no_id'], RECEP_COLS, { force, delta: !!lastSync });
     await logSync(pg, 'cdefou_reception', count, 'ok');
-    console.log(`[cdefou_reception] ${count} lignes upsert`);
+    console.log(`[cdefou_reception] ${count} lignes`);
   } catch (err) {
     await logSync(pg, 'cdefou_reception', 0, 'error', err.message);
     console.error(`[cdefou_reception] ERREUR: ${err.message}`);
@@ -153,9 +153,9 @@ async function syncCommandes(force) {
       suividatecreation:       r.SUIVIDATECREATION,
       suividatemodif:          r.SUIVIDATEMODIF,
     }));
-    const count = await batchUpsert(pg, 'cdefou_receplig', rows, ['no_id'], RECEPLIG_COLS);
+    const count = await mirrorRows(pg, 'cdefou_receplig', rows, ['no_id'], RECEPLIG_COLS, { force, delta: !!lastSync });
     await logSync(pg, 'cdefou_receplig', count, 'ok');
-    console.log(`[cdefou_receplig] ${count} lignes upsert`);
+    console.log(`[cdefou_receplig] ${count} lignes`);
   } catch (err) {
     await logSync(pg, 'cdefou_receplig', 0, 'error', err.message);
     console.error(`[cdefou_receplig] ERREUR: ${err.message}`);

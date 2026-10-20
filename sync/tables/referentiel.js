@@ -1,5 +1,5 @@
 const { getMssql, getPg } = require('../db');
-const { fullRefresh, batchUpsert, logSync } = require('../utils');
+const { fullRefresh, mirrorRows, logSync } = require('../utils');
 
 const NOMEN_COLS  = ['no_id','code','libelle','niveau','chemin_pere'];
 const GAMME_COLS  = ['no_id','code','libelle'];
@@ -22,9 +22,9 @@ async function syncReferentiel(force) {
       niveau:      r.NIVEAU,
       chemin_pere: r.CHEMIN_PERE,
     }));
-    const count = await batchUpsert(pg, 'nomenclature', rows, ['no_id'], NOMEN_COLS);
+    const count = await mirrorRows(pg, 'nomenclature', rows, ['no_id'], NOMEN_COLS, { force });
     await logSync(pg, 'nomenclature', count, 'ok');
-    console.log(`[nomenclature] ${count} lignes upsert`);
+    console.log(`[nomenclature] ${count} lignes`);
   } catch (err) {
     await logSync(pg, 'nomenclature', 0, 'error', err.message);
     console.error(`[nomenclature] ERREUR: ${err.message}`);
@@ -40,9 +40,9 @@ async function syncReferentiel(force) {
       code:    r.CODE,
       libelle: r.LIBELLE,
     }));
-    const count = await batchUpsert(pg, 'gammes', rows, ['no_id'], GAMME_COLS);
+    const count = await mirrorRows(pg, 'gammes', rows, ['no_id'], GAMME_COLS, { force });
     await logSync(pg, 'gammes', count, 'ok');
-    console.log(`[gammes] ${count} lignes upsert`);
+    console.log(`[gammes] ${count} lignes`);
   } catch (err) {
     await logSync(pg, 'gammes', 0, 'error', err.message);
     console.error(`[gammes] ERREUR: ${err.message}`);
@@ -58,9 +58,9 @@ async function syncReferentiel(force) {
       code:    r.CODE,
       libelle: r.LIBELLE,
     }));
-    const count = await batchUpsert(pg, 'saisons', rows, ['no_id'], SAISON_COLS);
+    const count = await mirrorRows(pg, 'saisons', rows, ['no_id'], SAISON_COLS, { force });
     await logSync(pg, 'saisons', count, 'ok');
-    console.log(`[saisons] ${count} lignes upsert`);
+    console.log(`[saisons] ${count} lignes`);
   } catch (err) {
     await logSync(pg, 'saisons', 0, 'error', err.message);
     console.error(`[saisons] ERREUR: ${err.message}`);

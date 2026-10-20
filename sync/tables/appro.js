@@ -1,5 +1,5 @@
 const { getMssql, getPg } = require('../db');
-const { batchUpsert, fullRefresh, getLastSync, logSync, safeStr, safeDecimal } = require('../utils');
+const { mirrorRows, fullRefresh, getLastSync, logSync, safeStr, safeDecimal } = require('../utils');
 
 const COMMANDE_FOU_COLS = [
   'no_id','cdenum','sit_cod_emet','sit_cod_desti','fouident_code',
@@ -70,9 +70,9 @@ async function syncAppro(force) {
       suividatemodif:   r.SUIVIDATEMODIF,
     }));
 
-    const count = await batchUpsert(pg, 'commande_fou', rows, ['no_id'], COMMANDE_FOU_COLS);
+    const count = await mirrorRows(pg, 'commande_fou', rows, ['no_id'], COMMANDE_FOU_COLS, { force, delta: !!lastSync });
     await logSync(pg, 'commande_fou', count, 'ok');
-    console.log(`[commande_fou] ${count} lignes upsert`);
+    console.log(`[commande_fou] ${count} lignes`);
   } catch (err) {
     await logSync(pg, 'commande_fou', 0, 'error', err.message);
     console.error(`[commande_fou] ERREUR: ${err.message}`);
@@ -113,9 +113,9 @@ async function syncAppro(force) {
       suividatemodif:      r.SUIVIDATEMODIF,
     }));
 
-    const count = await batchUpsert(pg, 'cdefou_ligne', rows, ['no_id'], CDEFOU_LIGNE_COLS);
+    const count = await mirrorRows(pg, 'cdefou_ligne', rows, ['no_id'], CDEFOU_LIGNE_COLS, { force, delta: !!lastSync });
     await logSync(pg, 'cdefou_ligne', count, 'ok');
-    console.log(`[cdefou_ligne] ${count} lignes upsert`);
+    console.log(`[cdefou_ligne] ${count} lignes`);
   } catch (err) {
     await logSync(pg, 'cdefou_ligne', 0, 'error', err.message);
     console.error(`[cdefou_ligne] ERREUR: ${err.message}`);
