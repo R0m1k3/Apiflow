@@ -16,7 +16,7 @@ Ce guide accompagne l'audit `docs/AUDIT-2026-10.md` (à la racine du dossier API
 | Token frp | `frpc.toml` (Debian) + `frps.toml` (Hostinger) | Le nouveau token se génère avec `openssl rand -hex 32` et doit être identique des deux côtés. L'ancien est faible et ne doit plus servir. |
 | Mot de passe PG Hostinger `post` | `gateway/.env` (`DST_PASS`) | L'ancien mot de passe figure dans l'historique git : il faut le **changer** (voir gateway/README.md). |
 | Login SQL Server | `.env.docker` (`DB_USER`/`DB_PASSWORD`) | La sync se connecte aujourd'hui avec **`sa`**. Il faut créer un login en lecture seule (script ci-dessous). |
-| Clés d'API | `.env.docker` (`API_KEYS`) | Générer une clé par application cliente avec `node -e "console.log(require('crypto').randomBytes(32).toString('base64url'))"`. |
+| Clés d'API | `.env.docker` (`API_KEYS`) | **Obligatoire** (sans clé, l'API refuse de démarrer, sauf `ALLOW_NO_AUTH=true`). Générer une clé par application cliente avec `node -e "console.log(require('crypto').randomBytes(32).toString('base64url'))"`. |
 | Dashboards sync | `.env.docker` + `gateway/.env` | `DASHBOARD_USER` / `DASHBOARD_PASSWORD` : sans eux, les dashboards renvoient 503. |
 | Alertes (optionnel) | les deux `.env` | `ALERT_WEBHOOK_URL` : webhook Slack, Discord ou Mattermost. |
 

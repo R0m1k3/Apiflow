@@ -6,7 +6,7 @@ const { getPool, closePool } = require('./config/database');
 const { requestLogger } = require('./middleware/logger');
 const { securityHeaders, cors } = require('./middleware/security');
 const { rateLimit, stopRateLimit, RATE_LIMIT } = require('./middleware/rateLimit');
-const { authMiddleware, authEnabled, startAuthWarnings, stopAuthWarnings } = require('./middleware/auth');
+const { authMiddleware, authEnabled, checkAuthConfig, startAuthWarnings, stopAuthWarnings } = require('./middleware/auth');
 const { responseCache } = require('./middleware/cache');
 const { errorHandler, notFound } = require('./middleware/errorHandler');
 
@@ -186,6 +186,7 @@ app.use(errorHandler);
 const PORT = parseInt(process.env.API_PORT, 10) || 3000;
 
 if (require.main === module) {
+  if (!checkAuthConfig()) process.exit(1);
   const server = app.listen(PORT, () => {
     console.log(`\nAPI Foirfouille démarrée sur le port ${PORT} (PostgreSQL)`);
     console.log(`Limite de débit : ${RATE_LIMIT} requêtes/min/IP`);

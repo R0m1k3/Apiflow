@@ -33,6 +33,7 @@ services:
       API_PORT:    3000
       PG_STATEMENT_TIMEOUT_MS: ${PG_STATEMENT_TIMEOUT_MS:-30000}
       API_KEYS:           ${API_KEYS:-}
+      ALLOW_NO_AUTH:      ${ALLOW_NO_AUTH:-false}
       CORS_ORIGINS:       ${CORS_ORIGINS:-}
       RATE_LIMIT_PER_MIN: ${RATE_LIMIT_PER_MIN:-600}
       TRUST_PROXY:        ${TRUST_PROXY:-loopback, linklocal, uniquelocal}

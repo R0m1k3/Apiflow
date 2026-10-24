@@ -2,7 +2,8 @@
 //   - en-tête  X-API-Key: <clé>   ou   Authorization: Bearer <clé>
 //   - clés autorisées : variable API_KEYS (séparées par des virgules)
 //   - comparaison en temps constant (hash SHA-256 + timingSafeEqual)
-// Si API_KEYS est vide : accès libre, avec avertissement au démarrage puis toutes les heures.
+// Si API_KEYS est vide : refus de démarrer (fail closed), sauf si ALLOW_NO_AUTH=true
+// est défini explicitement — accès libre, avec avertissement au démarrage puis toutes les heures.
 
 const crypto = require('crypto');
 
@@ -15,6 +16,8 @@ const KEYS = (process.env.API_KEYS || '')
 const KEY_HASHES = KEYS.map(sha256);
 
 const authEnabled = KEY_HASHES.length > 0;
+// Accès libre uniquement sur choix explicite (développement, réseau isolé)
+const allowNoAuth = !authEnabled && process.env.ALLOW_NO_AUTH === 'true';
 
 // Routes publiques : santé + photo (utilisée directement dans des <img>)
 const PUBLIC_ROUTES = [
@@ -56,6 +59,17 @@ function warnDisabled() {
 }
 
 let warnTimer = null;
+// Au démarrage : vrai si le serveur peut démarrer avec cette configuration
+function checkAuthConfig() {
+  if (authEnabled || allowNoAuth) return true;
+  console.error('\n' + '!'.repeat(72));
+  console.error('!! API_KEYS non définie : démarrage refusé (aucune authentification).');
+  console.error('!! Définir API_KEYS=<clé1>,<clé2> dans l\'environnement du conteneur,');
+  console.error('!! ou ALLOW_NO_AUTH=true pour accepter explicitement un accès libre.');
+  console.error('!'.repeat(72) + '\n');
+  return false;
+}
+
 function startAuthWarnings() {
   if (authEnabled) {
     console.log(`Authentification par clé d'API activée (${KEY_HASHES.length} clé(s)).`);
@@ -75,7 +89,9 @@ function authMiddleware(req, res, next) {
   // Empreinte courte de la clé (utilisée pour la clé du cache de réponses)
   req.apiKeyHash = key ? sha256(key).toString('hex').slice(0, 16) : 'anon';
 
-  if (!authEnabled || isPublic(req)) return next();
+  if (isPublic(req) || allowNoAuth) return next();
+  // Aucune clé configurée et accès libre non autorisé : on refuse tout
+  if (!authEnabled) return res.status(503).json({ error: 'Authentification non configurée' });
 
   if (!key || !isValidKey(key)) {
     res.set('WWW-Authenticate', 'Bearer realm="api"');
@@ -84,4 +100,4 @@ function authMiddleware(req, res, next) {
   return next();
 }
 
-module.exports = { authMiddleware, authEnabled, startAuthWarnings, stopAuthWarnings, isPublic };
+module.exports = { authMiddleware, authEnabled, checkAuthConfig, startAuthWarnings, stopAuthWarnings, isPublic };

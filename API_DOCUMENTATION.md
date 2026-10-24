@@ -32,7 +32,7 @@ Clé absente ou invalide → `401` :
 ```
 
 > Ne jamais passer la clé dans l'URL (query string) : elle finirait dans les journaux et l'historique.
-> Si le serveur n'a aucune clé configurée (`API_KEYS` vide), l'accès est libre et `/api/health` renvoie `"auth": "disabled"`.
+> Si le serveur n'a aucune clé configurée (`API_KEYS` vide), il refuse de démarrer. Seul `ALLOW_NO_AUTH=true` (choix explicite) autorise un accès libre ; `/api/health` renvoie alors `"auth": "disabled"`.
 
 ### Limitation de débit
 `RATE_LIMIT_PER_MIN` requêtes par minute et par adresse IP (600 par défaut). Au-delà → `429` avec l'en-tête `Retry-After` (secondes).
@@ -1533,7 +1533,8 @@ async function getCommandesFournisseur(codeFou) {
 
 | Variable | Défaut | Rôle |
 |----------|--------|------|
-| `API_KEYS` | *(vide)* | Clés d'API autorisées, séparées par des virgules. **Vide = authentification désactivée** (avertissement dans les logs au démarrage puis toutes les heures). |
+| `API_KEYS` | *(vide)* | Clés d'API autorisées, séparées par des virgules. **Obligatoire** : vide = l'API refuse de démarrer (sauf `ALLOW_NO_AUTH=true`). |
+| `ALLOW_NO_AUTH` | `false` | `true` = accepter explicitement de tourner sans clé d'API (accès libre, avertissement dans les logs au démarrage puis toutes les heures). Ignoré si `API_KEYS` est défini. |
 | `CORS_ORIGINS` | *(vide)* | Origines autorisées en CORS, séparées par des virgules (`*` = toutes). Vide = aucun en-tête CORS. |
 | `RATE_LIMIT_PER_MIN` | `600` | Requêtes max par minute et par IP. |
 | `TRUST_PROXY` | `loopback, linklocal, uniquelocal` | Proxys de confiance pour `X-Forwarded-For` (réglage Express `trust proxy`). |
