@@ -51,6 +51,9 @@ router.get('/ca', async (req, res) => {
         ${ca.qteVendue}  AS qte_vendue,
         ${ca.caHt}       AS ca_ht,
         ${ca.caTtc}      AS ca_ttc,
+        ${ca.caHtBrut}   AS ca_ht_brut,
+        ${ca.caTtcBrut}  AS ca_ttc_brut,
+        ${ca.retoursHt}  AS retours_ht,
         ${ca.retoursTtc} AS retours_ttc,
         ${ca.marge}      AS marge,
         ${ca.tauxMarge}  AS taux_marge
@@ -188,8 +191,7 @@ router.get('/ca/fournisseur', async (req, res) => {
           ${ca.qteVendue} AS qte_vendue,
           ${ca.caHt}      AS ca_ht,
           ${ca.caTtc}     AS ca_ttc,
-          ${ca.marge}     AS marge,
-          ${ca.mntHtNet}  AS mnt_ht_net
+          ${ca.marge}     AS marge
         FROM mvtart m
         ${where(conds)}
         GROUP BY m.artnoid
@@ -202,7 +204,7 @@ router.get('/ca/fournisseur', async (req, res) => {
         SUM(v.ca_ht)                         AS ca_ht,
         SUM(v.ca_ttc)                        AS ca_ttc,
         SUM(v.marge)                         AS marge,
-        ${tauxMarge('SUM(v.marge)', 'SUM(v.mnt_ht_net)')} AS taux_marge
+        ${tauxMarge('SUM(v.marge)', 'SUM(v.ca_ht)')} AS taux_marge
       FROM ventes v
       ${fouPrincipalLateral('v.artnoid', 'fp')}
       LEFT JOIN fouident fi ON TRIM(fi.code) = fp.code
@@ -287,6 +289,7 @@ router.get('/dashboard', async (req, res) => {
     pool.query(`
       WITH v AS (
         SELECT m.artnoid, m.site,
+               ${ca.caHt}      AS ca_ht,
                ${ca.caTtc}     AS ca_ttc,
                ${ca.qteVendue} AS qte_vendue,
                ${ca.marge}     AS marge
@@ -301,7 +304,7 @@ router.get('/dashboard', async (req, res) => {
                RANK() OVER (PARTITION BY site ORDER BY marge DESC NULLS LAST)  AS rk_marge
         FROM v
       )
-      SELECT a.codein, a.libelle1, r.site, r.ca_ttc, r.qte_vendue, r.marge,
+      SELECT a.codein, a.libelle1, r.site, r.ca_ht, r.ca_ttc, r.qte_vendue, r.marge,
              r.rk_ca, r.rk_qte, r.rk_marge
       FROM r
       JOIN articles a ON a.no_id = r.artnoid
@@ -309,12 +312,14 @@ router.get('/dashboard', async (req, res) => {
     `, pTop.values),
   ]);
 
+  // Un article sans vente nette ce jour-là (retours seulement) n'a rien à faire dans un top
+  const positif = { rk_ca: 'ca_ttc', rk_qte: 'qte_vendue', rk_marge: 'marge' };
   const top = (rkKey) => tops.rows
-    .filter(r => Number(r[rkKey]) <= 10)
+    .filter(r => Number(r[rkKey]) <= 10 && Number(r[positif[rkKey]]) > 0)
     .sort((x, y) => (x.site < y.site ? -1 : x.site > y.site ? 1 : Number(x[rkKey]) - Number(y[rkKey])))
     .map(r => ({
       codein: r.codein, libelle1: r.libelle1, site: r.site,
-      ca_ttc: r.ca_ttc, qte_vendue: r.qte_vendue, marge: r.marge,
+      ca_ht: r.ca_ht, ca_ttc: r.ca_ttc, qte_vendue: r.qte_vendue, marge: r.marge,
     }));
 
   // Comparaison N vs N-1 par site

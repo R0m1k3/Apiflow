@@ -316,9 +316,7 @@ GET /api/articles/:id/mouvements
 }
 ```
 
-**Valeurs `GenreMvt`** : `1` = entrée stock, `3` = vente, `4` = avoir/annulation, `9` = autre vente
-
-> Le CA TTC (`ca_ttc`) représente les **ventes brutes** (mouvements négatifs des genremvt 3, 4, 9). Le champ `retours_ttc` contient les retours séparément. CA net = `ca_ttc - retours_ttc`.
+**Valeurs `GenreMvt`** : `1` = entrées fournisseurs, `2` = entrées de cession, `3` = ventes et retours clients (tickets), `4` = sorties de cession, `9` = démarques / inventaires
 
 ---
 
@@ -931,7 +929,17 @@ Liste l'ensemble des règlements et paiements de tickets de caisse de la table `
 > - Période maximale : **3 ans** (1098 jours) → au-delà, `400`.
 > - Bornes **incluses** : `dateFin` couvre toute la journée.
 > - `site` = code site exact.
-> - **Définition unique du CA** : mouvements `genremvt IN (3, 4, 9)` ; `ca_ttc` / `ca_ht` / `qte_vendue` = valeurs absolues des lignes de montant TTC négatif (ventes brutes), `retours_ttc` = lignes positives, `marge` = Σ `margemvt`, `taux_marge` = marge / |Σ HT| × 100.
+> - **Définition du CA des routes `/api/performance/*`** (`src/utils/ca.js`) : ventes et retours clients (types de mouvement 11 et 12 ; repli `genremvt = 3` pour les lignes sans type).
+>   - `ca_ht` = − Σ `mntmvtht`, `ca_ttc` = − Σ `mntmvtttc`, `qte_vendue` = − Σ `qtemvt` : **nets des retours clients**, comme Qlik « CA Foirfouille » ;
+>   - `marge` = Σ `margemvt` (retours déduits) ; `taux_marge` = `marge` / `ca_ht` × 100, 0 si `ca_ht` ≤ 0 (plus de retours que de ventes) ;
+>   - détail sur `/ca` : `ca_ht_brut`, `ca_ttc_brut` (ventes seules), `retours_ht`, `retours_ttc` (retours seuls, positifs). Une ligne de montant TTC positif est un retour (retour client ou annulation). `ca_ht` = `ca_ht_brut` − `retours_ht`.
+>   - Les autres routes (`/api/articles/:id/mensuel`, `/api/ventes`, `/api/pilotage`, `/api/stock`) ont leurs propres formules, documentées avec elles.
+>
+> **Changement du 05/11/2026 (à signaler aux clients de l'API)** : `ca_ht`, `ca_ttc` et `qte_vendue` étaient **bruts** (retours non déduits) alors que `marge` et `taux_marge` étaient déjà nets.
+> - Un client qui recalculait `marge / ca_ht` obtenait un taux trop bas d'environ 0,5 pt : c'était l'écart constaté avec Qlik.
+> - Ne plus calculer `ca_ttc − retours_ttc` : ce serait retirer les retours deux fois. L'ancienne valeur brute reste disponible sur la route `/ca` (`ca_ht_brut` / `ca_ttc_brut`).
+> - Les tops du tableau de bord n'affichent que les articles dont le CA (ou la quantité, ou la marge) du jour est positif.
+> - Les séries enregistrées avant cette date par un client sont brutes, celles d'après sont nettes (environ −1,3 % sur le CA de Frouard et Houdemont en 2026).
 
 ### Chiffre d'affaires
 ```
@@ -962,9 +970,12 @@ GET /api/performance/ca
       "qte_vendue": 9640,
       "ca_ht": 85200.00,
       "ca_ttc": 97980.00,
+      "ca_ht_brut": 86287.00,
+      "ca_ttc_brut": 99230.00,
+      "retours_ht": 1087.00,
       "retours_ttc": 1250.00,
       "marge": 21300.00,
-      "taux_marge": 21.74
+      "taux_marge": 25.00
     }
   ]
 }
@@ -1009,7 +1020,7 @@ GET /api/performance/hitparade
       "ca_ht": 5760.00,
       "ca_ttc": 6624.00,
       "marge": 1440.00,
-      "taux_marge": 21.74,
+      "taux_marge": 25.00,
       "derniere_vente": "2024-06-15T00:00:00.000Z"
     }
   ]
@@ -1048,6 +1059,8 @@ GET /api/performance/ca/fournisseur?dateDebut=&dateFin=&site=
 ```
 
 > La jointure se fait via `artfou1.preference = 1` (fournisseur principal de l'article, une seule ligne retenue par article) → `fouident.code` pour le nom.
+>
+> **Différence avec Qlik** : Qlik « CA Foirfouille » ne regroupe pas les ventes par le fournisseur de la fiche article du magasin, mais (hypothèse principale, mesurée le 05/11/2026) par le fournisseur du **référentiel réseau** (libellés du type « DEPOT 113 », « MOREL LORY SARL »). Les totaux par magasin concordent, pas le découpage par fournisseur : des articles passent d'un fournisseur à l'autre (ex. Coca, chips Brets : LIDIS ici, SUPERGROUP dans le référentiel réseau).
 
 ---
 
@@ -1138,6 +1151,7 @@ Retourne une synthèse complète du jour demandé (par rapport au **même jour d
       "codein": "129632",
       "libelle1": "ETUI 10 CARTES",
       "site": "001",
+      "ca_ht": 204.58,
       "ca_ttc": 245.50,
       "qte_vendue": 60,
       "marge": 95.20
