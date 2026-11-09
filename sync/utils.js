@@ -1,4 +1,13 @@
 /**
+ * Rechargement complet chaque nuit (par défaut) : toutes les tables sont relues
+ * en entier depuis SQL Server et remplacées (DELETE + INSERT en transaction),
+ * les tables de mouvements sur tout leur historique (initialMonths). Les
+ * modifications ET les suppressions côté source sont donc toujours propagées.
+ * SYNC_FULL_RELOAD=false → ancien mode delta (SUIVIDATEMODIF + fenêtre 10 jours).
+ */
+const FULL_RELOAD = String(process.env.SYNC_FULL_RELOAD ?? 'true').toLowerCase() !== 'false';
+
+/**
  * Upsert en masse dans PostgreSQL (chunks de 500 lignes).
  * @param {import('pg').Pool} pg
  * @param {string} table  - nom de la table PostgreSQL (lowercase)
@@ -41,8 +50,19 @@ async function batchUpsert(pg, table, rows, pk, cols) {
  * - garde-fou : si la source renvoie < 50 % des lignes existantes (cube vide,
  *   requête tronquée…), on annule, sauf `force`.
  */
-async function fullRefresh(pg, table, rows, cols, { force = false, minRatio = 0.5 } = {}) {
+async function fullRefresh(pg, table, rows, cols, { force = false, minRatio = 0.5, pk = null } = {}) {
   const CHUNK = Math.max(1, Math.floor(60000 / cols.length));
+  let conflict = '';
+  if (pk && pk.length) {
+    // Doublons de clé côté source : la dernière occurrence gagne (comme l'upsert)
+    const byKey = new Map();
+    for (const r of rows) byKey.set(pk.map((k) => r[k]).join('\u0001'), r);
+    rows = [...byKey.values()];
+    const upd = cols.filter((c) => !pk.includes(c));
+    conflict = upd.length
+      ? `ON CONFLICT (${pk.join(', ')}) DO UPDATE SET ${upd.map((c) => `${c} = EXCLUDED.${c}`).join(', ')}`
+      : `ON CONFLICT (${pk.join(', ')}) DO NOTHING`;
+  }
   const client = await pg.connect();
   try {
     await client.query('BEGIN');
@@ -62,7 +82,7 @@ async function fullRefresh(pg, table, rows, cols, { force = false, minRatio = 0.
         });
         return `(${ph.join(', ')})`;
       });
-      await client.query(`INSERT INTO ${table} (${cols.join(', ')}) VALUES ${placeholders.join(', ')}`, values);
+      await client.query(`INSERT INTO ${table} (${cols.join(', ')}) VALUES ${placeholders.join(', ')} ${conflict}`, values);
       total += chunk.length;
     }
     await client.query('COMMIT');
@@ -81,6 +101,7 @@ async function fullRefresh(pg, table, rows, cols, { force = false, minRatio = 0.
  * SUIVIDATEMODIF est l'heure locale SQL Server ; les upserts sont idempotents).
  */
 async function getLastSync(pg, tableName, overlapDays = 2) {
+  if (FULL_RELOAD) return null;   // pas de delta : rechargement complet
   const res = await pg.query(
     `SELECT last_sync - make_interval(days => $2) AS since FROM sync_log WHERE table_name = $1 AND status = 'ok'`,
     [tableName, overlapDays]
@@ -154,4 +175,14 @@ function safeDecimal(v) {
   return m ? parseFloat(m[1]) : null;
 }
 
-module.exports = { batchUpsert, fullRefresh, getLastSync, logSync, safeStr, safeNum, safeInt, safeBit, safeDecimal };
+/**
+ * Écrit les lignes lues : remplacement complet de la table (miroir exact, les
+ * lignes supprimées côté source disparaissent) ou, en delta, simple upsert.
+ */
+async function mirrorRows(pg, table, rows, pk, cols, { force = false, delta = false } = {}) {
+  return delta
+    ? batchUpsert(pg, table, rows, pk, cols)
+    : fullRefresh(pg, table, rows, cols, { force, pk });
+}
+
+module.exports = { FULL_RELOAD, mirrorRows, batchUpsert, fullRefresh, getLastSync, logSync, safeStr, safeNum, safeInt, safeBit, safeDecimal };

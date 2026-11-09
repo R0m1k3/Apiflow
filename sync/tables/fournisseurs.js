@@ -1,5 +1,5 @@
 const { getMssql, getPg } = require('../db');
-const { batchUpsert, fullRefresh, getLastSync, logSync, safeDecimal } = require('../utils');
+const { mirrorRows, fullRefresh, getLastSync, logSync, safeDecimal } = require('../utils');
 
 const ARTFOU1_COLS = [
   'no_id','art_no_id','code','reference','ean13','itf',
@@ -44,9 +44,9 @@ async function syncFournisseurs(force) {
       suividatemodif:    r.SUIVIDATEMODIF,
     }));
 
-    const count = await batchUpsert(pg, 'artfou1', rows, ['no_id'], ARTFOU1_COLS);
+    const count = await mirrorRows(pg, 'artfou1', rows, ['no_id'], ARTFOU1_COLS, { force, delta: !!lastSync });
     await logSync(pg, 'artfou1', count, 'ok');
-    console.log(`[artfou1] ${count} lignes upsert`);
+    console.log(`[artfou1] ${count} lignes`);
   } catch (err) {
     await logSync(pg, 'artfou1', 0, 'error', err.message);
     console.error(`[artfou1] ERREUR: ${err.message}`);
@@ -62,9 +62,9 @@ async function syncFournisseurs(force) {
       prixachat:        safeDecimal(r.PRIXACHAT),
       remise_promotion: safeDecimal(r.REMISE_PROMOTION),
     }));
-    const count = await batchUpsert(pg, 'artfou2', rows, ['idartfou1'], ARTFOU2_COLS);
+    const count = await mirrorRows(pg, 'artfou2', rows, ['idartfou1'], ARTFOU2_COLS, { force });
     await logSync(pg, 'artfou2', count, 'ok');
-    console.log(`[artfou2] ${count} lignes upsert`);
+    console.log(`[artfou2] ${count} lignes`);
   } catch (err) {
     await logSync(pg, 'artfou2', 0, 'error', err.message);
     console.error(`[artfou2] ERREUR: ${err.message}`);
