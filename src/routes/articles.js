@@ -20,6 +20,7 @@ router.get('/', async (req, res) => {
   const codein      = parseText(q.codein, 'codein', { max: 50 });
   const ean         = parseText(q.ean, 'ean', { max: 50 });
   const codefou     = parseText(q.codefou, 'codefou', { max: 50 });
+  const ref         = parseText(q.ref, 'ref', { max: 100 });
   const artcentrale = parseText(q.artcentrale, 'artcentrale', { max: 50 });
   const actif       = parseEnum(q.actif, 'actif', ['1', '0'], { def: '' });
   const hasCentrale = parseEnum(q.has_artcentrale, 'has_artcentrale', ['1', '0'], { def: '' });
@@ -42,6 +43,12 @@ router.get('/', async (req, res) => {
   if (codefou) {
     conds.push(`EXISTS (SELECT 1 FROM artfou1 f
           WHERE f.art_no_id = a.no_id AND TRIM(f.code) ILIKE ${p.add(likeContains(codefou))})`);
+  }
+  // Référence fournisseur exacte (casse et espaces ignorés) ; avec `codefou`, chez ce fournisseur.
+  if (ref) {
+    const codeCond = codefou ? ` AND TRIM(fr.code) ILIKE ${p.add(likeContains(codefou))}` : '';
+    conds.push(`EXISTS (SELECT 1 FROM artfou1 fr
+          WHERE fr.art_no_id = a.no_id AND UPPER(TRIM(fr.reference)) = UPPER(${p.add(ref)})${codeCond})`);
   }
   if (artcentrale) conds.push(`TRIM(a.artcentrale) LIKE ${p.add(likeContains(artcentrale))}`);
   if (hasCentrale === '1') conds.push(CENTRALE_CONFORME);

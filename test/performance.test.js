@@ -20,7 +20,7 @@ const PG = {
   database: process.env.TEST_PG_DB || 'foirfouille_test',
 };
 const skip = !PG.host && 'TEST_PG_HOST non défini';
-const PORT = 3999;
+const PORT = Number(process.env.TEST_API_PORT || 3999);
 const KEY = 'cle-de-test';
 let api;
 
@@ -118,4 +118,13 @@ test('/dashboard : tops avec CA HT et CA TTC nets', { skip }, async () => {
   const a2 = d.top10_ca.find((r) => r.codein === 'A2');
   assert.equal(n(a2.ca_ht), 20);
   assert.equal(n(a2.ca_ttc), 24);
+});
+
+test('/articles?ref : référence fournisseur exacte, filtrée par fournisseur', { skip }, async () => {
+  const codes = async (q) => (await get(`/articles?${q}`)).articles.map((a) => a.codein).sort();
+  // Exacte (pas « 03/3484-S »), casse et espaces ignorés ; présente chez deux fournisseurs
+  assert.deepEqual(await codes('ref=03%2F3484'), ['L50', 'L51']);
+  assert.deepEqual(await codes('ref=03%2F3484&codefou=R0041'), ['L50']);
+  assert.deepEqual(await codes('ref=03%2f3484-s'), ['L51']);
+  assert.deepEqual(await codes('ref=INCONNUE'), []);
 });
