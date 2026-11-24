@@ -26,3 +26,8 @@ INSERT INTO mvtart (no_id, artnoid, datmvt, site, genremvt, mvttypnoid, qtemvt, 
   (151, 3, '2026-02-15 16:00', '700', 3, 12,  1,   5,   6, -2),
   (152, 4, '2026-02-15 11:00', '700', 3, 12,  1,   3,   4, -1),
   (153, 3, '2026-03-05 10:00', '700', 3, 12,  1,   5,   6, -2);
+
+-- Recherche par référence fournisseur (test/performance.test.js : « /articles?ref »)
+INSERT INTO articles (no_id, codein, libelle1) VALUES (50, 'L50', 'LOT DE 3 BOITES'), (51, 'L51', 'BOITE S');
+INSERT INTO artfou1 (no_id, art_no_id, code, reference, preference) VALUES
+  (500, 50, 'R0041', ' 03/3484 ', 1), (501, 51, 'R0041', '03/3484-S', 1), (502, 51, 'X0001', '03/3484', 2);

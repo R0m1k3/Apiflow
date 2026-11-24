@@ -145,6 +145,7 @@ CREATE TABLE IF NOT EXISTS artfou1 (
 );
 CREATE INDEX IF NOT EXISTS idx_artfou1_art_no_id ON artfou1 (art_no_id);
 CREATE INDEX IF NOT EXISTS idx_artfou1_code      ON artfou1 (code);
+CREATE INDEX IF NOT EXISTS idx_artfou1_ref_upper ON artfou1 (UPPER(TRIM(reference)));
 CREATE INDEX IF NOT EXISTS idx_artfou1_art_pref  ON artfou1 (art_no_id, preference);
 
 CREATE TABLE IF NOT EXISTS artfou2 (

@@ -77,6 +77,7 @@ GET /api/articles
 | `codein`  | string | Code interne (partiel, insensible à la casse) | — |
 | `ean`     | string | EAN / GTIN (partiel) — cherche dans **tous** les GTIN de l'article | — |
 | `codefou` | string | Code fournisseur (partiel)           | —      |
+| `ref`     | string | Référence fournisseur **exacte** (casse et espaces de bord ignorés) ; avec `codefou`, la référence doit être chez ce fournisseur | — |
 | `actif`   | `1`/`0`| `1` = actif, `0` = suspendu         | —      |
 | `artcentrale` | string | Code centrale (partiel)          | —      |
 | `has_artcentrale` | `1`/`0` | `1` = référencé centrale, `0` = non référencé | — |
